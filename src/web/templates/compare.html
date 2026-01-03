@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Compare to {{ poll|upper }} Poll - {{ comparison.season }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2 class="section-title">Comparison to {{ poll|upper }} Poll</h2>
+
+    <div class="controls">
+        <label for="poll-select">Poll:</label>
+        <select id="poll-select"
+                name="poll"
+                hx-get="/compare/{{ comparison.season }}/table"
+                hx-target="#comparison-content"
+                hx-trigger="change"
+                hx-indicator=".htmx-indicator">
+            <option value="ap" {% if poll == 'ap' %}selected{% endif %}>AP Poll</option>
+            <option value="cfp" {% if poll == 'cfp' %}selected{% endif %}>CFP Rankings</option>
+            <option value="coaches" {% if poll == 'coaches' %}selected{% endif %}>Coaches Poll</option>
+        </select>
+        <span class="htmx-indicator loading">Loading...</span>
+    </div>
+
+    <div id="comparison-content">
+        {% include "partials/comparison_table.html" %}
+    </div>
+</div>
+{% endblock %}

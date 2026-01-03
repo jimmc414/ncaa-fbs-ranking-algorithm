@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Rankings - {{ season }}{% if week %} Week {{ week }}{% endif %}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2 class="section-title">{{ season }} Rankings{% if week %} - Week {{ week }}{% endif %}</h2>
+
+    <div class="controls">
+        <label for="week-select">Week:</label>
+        <select id="week-select"
+                name="week"
+                hx-get="/rankings/{{ season }}/table"
+                hx-target="#rankings-table"
+                hx-trigger="change"
+                hx-indicator=".htmx-indicator">
+            <option value="">Full Season</option>
+            {% for w in weeks %}
+            <option value="{{ w }}" {% if w == week %}selected{% endif %}>Week {{ w }}</option>
+            {% endfor %}
+        </select>
+        <span class="htmx-indicator loading">Loading...</span>
+    </div>
+
+    <div id="rankings-table">
+        {% include "partials/rankings_table.html" %}
+    </div>
+</div>
+{% endblock %}

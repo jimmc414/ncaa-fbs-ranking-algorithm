@@ -1,0 +1,32 @@
+{% if rankings %}
+<table>
+    <thead>
+        <tr>
+            <th>Rank</th>
+            <th>Team</th>
+            <th>Record</th>
+            <th>Rating</th>
+            <th>SOS</th>
+            <th>SOV</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rankings %}
+        <tr>
+            <td class="rank">#{{ r.rank }}</td>
+            <td>
+                <a href="/teams/{{ r.team_id }}/{{ r.season }}" class="team-link">
+                    {{ r.team_id }}
+                </a>
+            </td>
+            <td class="record">{{ r.wins }}-{{ r.losses }}</td>
+            <td class="rating">{{ "%.4f"|format(r.rating) }}</td>
+            <td>{% if r.strength_of_schedule %}{{ "%.3f"|format(r.strength_of_schedule) }}{% else %}-{% endif %}</td>
+            <td>{% if r.strength_of_victory %}{{ "%.3f"|format(r.strength_of_victory) }}{% else %}-{% endif %}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="not-found">No rankings available for this selection.</p>
+{% endif %}

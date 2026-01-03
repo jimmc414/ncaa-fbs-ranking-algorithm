@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}{{ team.team_id if team else 'Team' }} - {{ season }}{% endblock %}
+
+{% block content %}
+{% if team %}
+<div class="card">
+    <h2 class="section-title">{{ team.team_id }}</h2>
+
+    <div style="display: flex; gap: 40px; margin-bottom: 30px;">
+        <div>
+            <p><strong>Rank:</strong> <span class="rank">#{{ team.rank }}</span></p>
+        </div>
+        <div>
+            <p><strong>Rating:</strong> <span class="rating">{{ "%.4f"|format(team.normalized_rating) }}</span></p>
+        </div>
+        <div>
+            <p><strong>Convergence:</strong> {{ team.iterations_to_converge }} iterations</p>
+        </div>
+    </div>
+
+    <h3 class="section-title">Game-by-Game Breakdown</h3>
+
+    {% if team.games %}
+    <table>
+        <thead>
+            <tr>
+                <th>Opponent</th>
+                <th>Result</th>
+                <th>Margin</th>
+                <th>Location</th>
+                <th>Game Grade</th>
+                <th>Opp Rating</th>
+                <th>Contribution</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for game in team.games %}
+            <tr>
+                <td>
+                    <a href="/teams/{{ game.opponent_id }}/{{ season }}" class="team-link">
+                        {{ game.opponent_id }}
+                    </a>
+                </td>
+                <td>
+                    {% if game.is_win %}
+                    <span class="win">W</span>
+                    {% else %}
+                    <span class="loss">L</span>
+                    {% endif %}
+                </td>
+                <td>{{ game.margin|abs }}</td>
+                <td>{{ game.location[0]|upper }}</td>
+                <td class="rating">{{ "%.3f"|format(game.game_grade) }}</td>
+                <td>{{ "%.3f"|format(game.opponent_rating) }}</td>
+                <td class="rating">{{ "%.3f"|format(game.contribution) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="not-found">No games found.</p>
+    {% endif %}
+</div>
+{% else %}
+<div class="card">
+    <p class="not-found">Team not found or no data available.</p>
+</div>
+{% endif %}
+{% endblock %}

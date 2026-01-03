@@ -1,0 +1,74 @@
+<div style="text-align: center; margin: 30px 0;">
+    <p>Spearman Correlation</p>
+    {% set corr_pct = (comparison.spearman_correlation * 100)|round|int %}
+    <p class="correlation {% if corr_pct > 80 %}high{% elif corr_pct > 60 %}medium{% else %}low{% endif %}">
+        {{ corr_pct }}%
+    </p>
+    <p style="color: #666;">{{ comparison.teams_compared }} teams compared</p>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+    <div>
+        <h3 class="section-title">Overranked (We rank higher)</h3>
+        {% if comparison.overranked %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Team</th>
+                    <th>Our Rank</th>
+                    <th>Poll Rank</th>
+                    <th>Diff</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for team in comparison.overranked[:10] %}
+                <tr>
+                    <td>
+                        <a href="/teams/{{ team.team_id }}/{{ comparison.season }}" class="team-link">
+                            {{ team.team_id }}
+                        </a>
+                    </td>
+                    <td class="rank">#{{ team.our_rank }}</td>
+                    <td>#{{ team.poll_rank }}</td>
+                    <td class="diff-positive">+{{ team.difference }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="not-found">No overranked teams.</p>
+        {% endif %}
+    </div>
+
+    <div>
+        <h3 class="section-title">Underranked (We rank lower)</h3>
+        {% if comparison.underranked %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Team</th>
+                    <th>Our Rank</th>
+                    <th>Poll Rank</th>
+                    <th>Diff</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for team in comparison.underranked[:10] %}
+                <tr>
+                    <td>
+                        <a href="/teams/{{ team.team_id }}/{{ comparison.season }}" class="team-link">
+                            {{ team.team_id }}
+                        </a>
+                    </td>
+                    <td>#{{ team.our_rank }}</td>
+                    <td class="rank">#{{ team.poll_rank }}</td>
+                    <td class="diff-negative">{{ team.difference }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="not-found">No underranked teams.</p>
+        {% endif %}
+    </div>
+</div>
