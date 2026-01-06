@@ -88,6 +88,12 @@ def tied_teams_games() -> list[Game]:
     ]
 
 
+@pytest.fixture
+def test_config() -> AlgorithmConfig:
+    """Test config with min_games_to_rank=1 for test fixtures with few games."""
+    return AlgorithmConfig(min_games_to_rank=1)
+
+
 # =============================================================================
 # Basic Ranking Tests
 # =============================================================================
@@ -458,3 +464,110 @@ class TestEdgeCases:
         assert len(rankings) == 2
         # Winner should be ranked higher
         assert rankings[0].team_id == "team-a"
+
+
+# =============================================================================
+# FCS Team Handling Tests
+# =============================================================================
+
+
+class TestFCSHandling:
+    """Tests for FCS team handling."""
+
+    @pytest.fixture
+    def fbs_fcs_games(self) -> list[Game]:
+        """FBS teams playing each other and an FCS team."""
+        return [
+            # FBS round robin
+            make_game(1, "fbs-a", "fbs-b", 28, 14, week=1),  # A beats B
+            make_game(2, "fbs-a", "fbs-c", 35, 7, week=2),   # A beats C
+            make_game(3, "fbs-b", "fbs-c", 21, 14, week=3),  # B beats C
+            # FCS team beats an FBS team (upset)
+            make_game(4, "fcs-team", "fbs-c", 24, 21, week=4),  # FCS beats C
+        ]
+
+    @pytest.fixture
+    def fbs_teams(self):
+        """FBS team objects."""
+        from src.data.models import Team
+        return [
+            Team(team_id="fbs-a", name="FBS A", division="fbs", conference="Big Ten"),
+            Team(team_id="fbs-b", name="FBS B", division="fbs", conference="SEC"),
+            Team(team_id="fbs-c", name="FBS C", division="fbs", conference="ACC"),
+        ]
+
+    @pytest.fixture
+    def all_teams(self, fbs_teams):
+        """All teams including FCS."""
+        from src.data.models import Team
+        return fbs_teams + [
+            Team(team_id="fcs-team", name="FCS Team", division="fcs", conference="FCS"),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_fcs_teams_get_fixed_rating_during_iteration(self, fbs_fcs_games, all_teams):
+        """FCS teams use fcs_fixed_rating during convergence iteration."""
+        from src.ranking.engine import RankingEngine
+
+        # With very low FCS rating, beating an FCS team gives less credit
+        config_low_fcs = AlgorithmConfig(fcs_fixed_rating=0.10)
+        engine_low = RankingEngine(config=config_low_fcs)
+        rankings_low = await engine_low.rank_season(
+            2024, games=fbs_fcs_games, teams=all_teams
+        )
+
+        # With higher FCS rating, beating an FCS team gives more credit
+        config_high_fcs = AlgorithmConfig(fcs_fixed_rating=0.40)
+        engine_high = RankingEngine(config=config_high_fcs)
+        rankings_high = await engine_high.rank_season(
+            2024, games=fbs_fcs_games, teams=all_teams
+        )
+
+        # The FCS team's rating should differ based on config
+        fcs_low = next(r for r in rankings_low if r.team_id == "fcs-team")
+        fcs_high = next(r for r in rankings_high if r.team_id == "fcs-team")
+
+        # Higher fixed rating = higher normalized rating for FCS team
+        assert fcs_high.rating > fcs_low.rating
+
+    @pytest.mark.asyncio
+    async def test_exclude_fcs_from_rankings(self, fbs_fcs_games, all_teams):
+        """FCS teams excluded when exclude_fcs_from_rankings=True."""
+        from src.ranking.engine import RankingEngine
+
+        config = AlgorithmConfig(exclude_fcs_from_rankings=True)
+        engine = RankingEngine(config=config)
+        rankings = await engine.rank_season(
+            2024, games=fbs_fcs_games, teams=all_teams
+        )
+
+        # FCS team should not appear in rankings
+        team_ids = [r.team_id for r in rankings]
+        assert "fcs-team" not in team_ids
+        assert len(rankings) == 3  # Only FBS teams
+
+    @pytest.mark.asyncio
+    async def test_fcs_games_still_count_when_excluded(self, fbs_fcs_games, all_teams):
+        """FCS games still affect FBS ratings even when FCS excluded from output."""
+        from src.ranking.engine import RankingEngine
+
+        config = AlgorithmConfig(exclude_fcs_from_rankings=True)
+        engine = RankingEngine(config=config)
+        rankings = await engine.rank_season(
+            2024, games=fbs_fcs_games, teams=all_teams
+        )
+
+        # FBS-C lost to FCS team, should hurt their rating
+        fbs_c = next(r for r in rankings if r.team_id == "fbs-c")
+        assert fbs_c.rank == 3  # Should be last among FBS teams
+
+    @pytest.mark.asyncio
+    async def test_without_teams_fcs_not_detected(self, fbs_fcs_games):
+        """Without teams list, FCS handling not applied (backward compat)."""
+        from src.ranking.engine import RankingEngine
+
+        engine = RankingEngine()
+        rankings = await engine.rank_season(2024, games=fbs_fcs_games)
+
+        # All 4 teams should be ranked
+        assert len(rankings) == 4

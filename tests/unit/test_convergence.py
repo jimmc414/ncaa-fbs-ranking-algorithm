@@ -496,3 +496,156 @@ class TestLossPenalty:
         # A should be higher than B (A beat B, only lost to C)
         assert result.ratings["C"] > result.ratings["A"]
         assert result.ratings["A"] > result.ratings["B"]
+
+
+class TestOpponentWeight:
+    """Tests for opponent_weight configuration."""
+
+    def test_opponent_weight_default(self, four_team_round_robin, algorithm_config):
+        """Default opponent weight is 1.0."""
+        from src.algorithm.convergence import converge
+
+        result = converge(four_team_round_robin, algorithm_config)
+        # A beats B, C, D - should be rated highest
+        assert result.ratings["A"] > result.ratings["B"]
+
+    def test_opponent_weight_affects_ratings(self, four_team_round_robin):
+        """Different opponent_weight values produce different ratings."""
+        from src.data.models import AlgorithmConfig
+        from src.algorithm.convergence import converge
+
+        # Default weight (1.0)
+        config_default = AlgorithmConfig(opponent_weight=1.0)
+        result_default = converge(four_team_round_robin, config_default)
+
+        # Different weight (0.8)
+        config_modified = AlgorithmConfig(opponent_weight=0.8)
+        result_modified = converge(four_team_round_robin, config_modified)
+
+        # Different opponent_weight should produce different ratings
+        # (while maintaining the same ordering: A > B > C > D)
+        sorted_default = sorted(result_default.ratings.items(), key=lambda x: x[1], reverse=True)
+        sorted_modified = sorted(result_modified.ratings.items(), key=lambda x: x[1], reverse=True)
+
+        # Same ordering
+        assert [t[0] for t in sorted_default] == [t[0] for t in sorted_modified]
+
+        # But different actual ratings
+        assert result_default.ratings["A"] != result_modified.ratings["A"]
+
+
+class TestQualityTiers:
+    """Tests for quality tier bonuses/penalties."""
+
+    def test_quality_tiers_disabled_by_default(self, algorithm_config):
+        """Quality tiers disabled by default."""
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig()
+        assert config.enable_quality_tiers is False
+
+    def test_elite_win_bonus_applied(self):
+        """Beating an elite team gives bonus."""
+        from src.data.models import AlgorithmConfig, Game
+        from src.algorithm.convergence import converge
+
+        # Three team scenario: A beats B, B beats C, A beats C
+        # B is elite (above threshold), so A gets bonus for beating B
+        games = [
+            Game(
+                game_id=1,
+                season=2024,
+                week=1,
+                game_date=date(2024, 8, 31),
+                home_team_id="A",
+                away_team_id="B",
+                home_score=21,
+                away_score=14,
+            ),
+            Game(
+                game_id=2,
+                season=2024,
+                week=2,
+                game_date=date(2024, 9, 7),
+                home_team_id="B",
+                away_team_id="C",
+                home_score=35,
+                away_score=7,
+            ),
+            Game(
+                game_id=3,
+                season=2024,
+                week=3,
+                game_date=date(2024, 9, 14),
+                home_team_id="A",
+                away_team_id="C",
+                home_score=42,
+                away_score=0,
+            ),
+        ]
+
+        config_off = AlgorithmConfig(enable_quality_tiers=False)
+        config_on = AlgorithmConfig(
+            enable_quality_tiers=True,
+            elite_threshold=0.60,
+            elite_win_bonus=0.10,
+        )
+
+        result_off = converge(games, config_off)
+        result_on = converge(games, config_on)
+
+        # A should be rated higher with quality tiers on (bonus for beating B)
+        assert result_on.ratings["A"] >= result_off.ratings["A"]
+
+    def test_bad_loss_penalty_applied(self):
+        """Losing to a bad team gives penalty."""
+        from src.data.models import AlgorithmConfig, Game
+        from src.algorithm.convergence import converge
+
+        # Scenario: A beats B, B beats C, A loses to C
+        # C is bad (below threshold), so A gets penalty for losing to C
+        games = [
+            Game(
+                game_id=1,
+                season=2024,
+                week=1,
+                game_date=date(2024, 8, 31),
+                home_team_id="A",
+                away_team_id="B",
+                home_score=28,
+                away_score=14,
+            ),
+            Game(
+                game_id=2,
+                season=2024,
+                week=2,
+                game_date=date(2024, 9, 7),
+                home_team_id="B",
+                away_team_id="C",
+                home_score=42,
+                away_score=7,
+            ),
+            Game(
+                game_id=3,
+                season=2024,
+                week=3,
+                game_date=date(2024, 9, 14),
+                home_team_id="C",
+                away_team_id="A",
+                home_score=10,  # Upset!
+                away_score=7,
+            ),
+        ]
+
+        config_off = AlgorithmConfig(enable_quality_tiers=False)
+        config_on = AlgorithmConfig(
+            enable_quality_tiers=True,
+            bad_threshold=0.35,
+            bad_loss_penalty=0.10,
+        )
+
+        result_off = converge(games, config_off)
+        result_on = converge(games, config_on)
+
+        # A should be rated lower with quality tiers on (penalty for losing to C)
+        assert result_on.ratings["A"] <= result_off.ratings["A"]

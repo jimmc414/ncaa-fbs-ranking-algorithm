@@ -280,3 +280,198 @@ class TestGameGradeForGameResult:
 
         # Road loss = 0.00
         assert grade == 0.00
+
+
+class TestMarginCurve:
+    """Tests for different margin curve functions."""
+
+    def test_log_curve_default(self):
+        """Log curve is the default."""
+        from src.algorithm.game_grade import compute_margin_bonus_curved
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig()
+        bonus = compute_margin_bonus_curved(14, is_win=True, config=config)
+        # Should match logarithmic calculation
+        expected = 0.20 * math.log(15) / math.log(29)
+        assert abs(bonus - expected) < 0.001
+
+    def test_linear_curve(self):
+        """Linear curve gives proportional bonus."""
+        from src.algorithm.game_grade import compute_margin_bonus_curved
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig(margin_curve="linear")
+
+        # 14 points out of 28 max = 50%
+        bonus_14 = compute_margin_bonus_curved(14, is_win=True, config=config)
+        bonus_28 = compute_margin_bonus_curved(28, is_win=True, config=config)
+
+        # 14 should be exactly half of 28 for linear
+        assert abs(bonus_14 - (bonus_28 / 2)) < 0.001
+
+    def test_sqrt_curve(self):
+        """Sqrt curve is between log and linear."""
+        from src.algorithm.game_grade import compute_margin_bonus_curved
+        from src.data.models import AlgorithmConfig
+
+        config_log = AlgorithmConfig(margin_curve="log")
+        config_sqrt = AlgorithmConfig(margin_curve="sqrt")
+        config_linear = AlgorithmConfig(margin_curve="linear")
+
+        bonus_log = compute_margin_bonus_curved(14, is_win=True, config=config_log)
+        bonus_sqrt = compute_margin_bonus_curved(14, is_win=True, config=config_sqrt)
+        bonus_linear = compute_margin_bonus_curved(14, is_win=True, config=config_linear)
+
+        # sqrt should be between log and linear for mid-range values
+        assert bonus_log > bonus_sqrt or abs(bonus_log - bonus_sqrt) < 0.01
+        assert bonus_sqrt >= bonus_linear or abs(bonus_sqrt - bonus_linear) < 0.01
+
+    def test_loss_no_bonus_any_curve(self):
+        """Losses get no bonus regardless of curve."""
+        from src.algorithm.game_grade import compute_margin_bonus_curved
+        from src.data.models import AlgorithmConfig
+
+        for curve in ["log", "linear", "sqrt"]:
+            config = AlgorithmConfig(margin_curve=curve)
+            bonus = compute_margin_bonus_curved(28, is_win=False, config=config)
+            assert bonus == 0.0
+
+    def test_all_curves_cap_at_28(self):
+        """All curves cap at margin 28."""
+        from src.algorithm.game_grade import compute_margin_bonus_curved
+        from src.data.models import AlgorithmConfig
+
+        for curve in ["log", "linear", "sqrt"]:
+            config = AlgorithmConfig(margin_curve=curve)
+            bonus_28 = compute_margin_bonus_curved(28, is_win=True, config=config)
+            bonus_50 = compute_margin_bonus_curved(50, is_win=True, config=config)
+            assert bonus_28 == bonus_50
+
+
+class TestRecencyWeight:
+    """Tests for recency weight calculation."""
+
+    def test_recency_disabled_by_default(self):
+        """With recency disabled, all games weight 1.0."""
+        from src.algorithm.game_grade import compute_recency_weight
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig()  # enable_recency=False by default
+        weight = compute_recency_weight(weeks_ago=10, current_week=12, config=config)
+        assert weight == 1.0
+
+    def test_recency_current_week_full_weight(self):
+        """Current week game gets full weight."""
+        from src.algorithm.game_grade import compute_recency_weight
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig(enable_recency=True, recency_half_life=8)
+        weight = compute_recency_weight(weeks_ago=0, current_week=12, config=config)
+        assert weight == 1.0
+
+    def test_recency_half_life(self):
+        """Game at half-life weeks ago gets ~0.5 weight (above min)."""
+        from src.algorithm.game_grade import compute_recency_weight
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig(
+            enable_recency=True, recency_half_life=8, recency_min_weight=0.0
+        )
+        weight = compute_recency_weight(weeks_ago=8, current_week=12, config=config)
+        assert abs(weight - 0.5) < 0.01
+
+    def test_recency_floor(self):
+        """Weight doesn't go below min_weight."""
+        from src.algorithm.game_grade import compute_recency_weight
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig(
+            enable_recency=True, recency_half_life=4, recency_min_weight=0.5
+        )
+        # 16 weeks ago with half-life 4 = 4 half-lives = 0.0625 raw
+        # But min_weight floors it at 0.5
+        weight = compute_recency_weight(weeks_ago=16, current_week=18, config=config)
+        assert weight == 0.5
+
+    def test_recency_short_half_life(self):
+        """Shorter half-life decays faster."""
+        from src.algorithm.game_grade import compute_recency_weight
+        from src.data.models import AlgorithmConfig
+
+        config_short = AlgorithmConfig(
+            enable_recency=True, recency_half_life=4, recency_min_weight=0.0
+        )
+        config_long = AlgorithmConfig(
+            enable_recency=True, recency_half_life=8, recency_min_weight=0.0
+        )
+
+        weight_short = compute_recency_weight(
+            weeks_ago=8, current_week=12, config=config_short
+        )
+        weight_long = compute_recency_weight(
+            weeks_ago=8, current_week=12, config=config_long
+        )
+
+        # Shorter half-life = faster decay = lower weight
+        assert weight_short < weight_long
+
+
+class TestConferenceMultiplier:
+    """Tests for conference multiplier calculation."""
+
+    def test_conference_adj_disabled_by_default(self):
+        """With conference adj disabled, multiplier is 1.0."""
+        from src.algorithm.game_grade import compute_conference_multiplier
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig()  # enable_conference_adj=False by default
+        mult = compute_conference_multiplier("SEC", config=config)
+        assert mult == 1.0
+
+    def test_p5_multiplier(self):
+        """P5 conferences get p5_multiplier."""
+        from src.algorithm.game_grade import compute_conference_multiplier
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig(enable_conference_adj=True, p5_multiplier=1.05)
+        for conf in ["SEC", "Big Ten", "Big 12", "ACC", "Pac-12"]:
+            mult = compute_conference_multiplier(conf, config=config)
+            assert mult == 1.05
+
+    def test_g5_multiplier(self):
+        """G5 conferences get g5_multiplier."""
+        from src.algorithm.game_grade import compute_conference_multiplier
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig(enable_conference_adj=True, g5_multiplier=0.85)
+        for conf in ["American Athletic", "Mountain West", "Sun Belt", "MAC", "Conference USA"]:
+            mult = compute_conference_multiplier(conf, config=config)
+            assert mult == 0.85
+
+    def test_fcs_multiplier(self):
+        """FCS conferences get fcs_multiplier."""
+        from src.algorithm.game_grade import compute_conference_multiplier
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig(enable_conference_adj=True, fcs_multiplier=0.40)
+        mult = compute_conference_multiplier("FCS", config=config)
+        assert mult == 0.40
+
+    def test_independent_as_p5(self):
+        """Independents (Notre Dame, etc.) treated as P5."""
+        from src.algorithm.game_grade import compute_conference_multiplier
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig(enable_conference_adj=True, p5_multiplier=1.05)
+        mult = compute_conference_multiplier("FBS Independents", config=config)
+        assert mult == 1.05
+
+    def test_unknown_conference_as_g5(self):
+        """Unknown conferences default to G5."""
+        from src.algorithm.game_grade import compute_conference_multiplier
+        from src.data.models import AlgorithmConfig
+
+        config = AlgorithmConfig(enable_conference_adj=True, g5_multiplier=0.90)
+        mult = compute_conference_multiplier("Unknown Conference", config=config)
+        assert mult == 0.90

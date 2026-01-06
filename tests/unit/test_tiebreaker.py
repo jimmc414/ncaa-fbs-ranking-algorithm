@@ -479,3 +479,87 @@ class TestResolveTies:
         # With wide threshold (0.02), tied - B wins H2H
         result_wide = resolve_ties(teams, games, ratings, threshold=0.02)
         assert result_wide == ["team-b", "team-a"]
+
+
+# =============================================================================
+# Configurable Tiebreaker Order Tests
+# =============================================================================
+
+
+class TestConfigurableTiebreakerOrder:
+    """Tests for configurable tiebreaker order."""
+
+    def test_default_order_h2h_first(self):
+        """Default order resolves by h2h first."""
+        from src.algorithm.tiebreaker import resolve_ties_with_config
+        from src.data.models import AlgorithmConfig
+
+        teams = [("team-a", 0.700), ("team-b", 0.7005)]
+        games = [make_game(1, "team-a", "team-b", 28, 14)]  # A beat B
+        ratings = {"team-a": 0.700, "team-b": 0.7005}
+
+        config = AlgorithmConfig()  # Default order: ["h2h", "sov", "common", "away"]
+        result = resolve_ties_with_config(teams, games, ratings, config)
+        assert result == ["team-a", "team-b"]
+
+    def test_sov_first_order(self):
+        """SOV-first order uses SOV before h2h."""
+        from src.algorithm.tiebreaker import resolve_ties_with_config
+        from src.data.models import AlgorithmConfig
+
+        teams = [("team-a", 0.700), ("team-b", 0.7005)]
+        games = [
+            make_game(1, "team-a", "team-b", 28, 14),  # A beat B (H2H favors A)
+            make_game(2, "team-a", "team-c", 21, 7),  # A beats weak opponent
+            make_game(3, "team-b", "team-d", 21, 7),  # B beats strong opponent
+        ]
+        ratings = {"team-a": 0.700, "team-b": 0.7005, "team-c": 0.2, "team-d": 0.8}
+
+        # Default order: H2H wins - A is ahead
+        config_default = AlgorithmConfig()
+        result_default = resolve_ties_with_config(teams, games, ratings, config_default)
+        assert result_default == ["team-a", "team-b"]
+
+        # SOV-first order: B has better SOV (0.8 vs 0.45) - B is ahead
+        # Note: A beat B (0.7005) and C (0.2), avg = 0.45
+        # B beat D (0.8), avg = 0.8
+        config_sov_first = AlgorithmConfig(tiebreaker_order=["sov", "h2h", "common", "away"])
+        result_sov_first = resolve_ties_with_config(teams, games, ratings, config_sov_first)
+        assert result_sov_first == ["team-b", "team-a"]
+
+    def test_away_first_order(self):
+        """Away-first order uses away win % first."""
+        from src.algorithm.tiebreaker import resolve_ties_with_config
+        from src.data.models import AlgorithmConfig
+
+        teams = [("team-a", 0.700), ("team-b", 0.7005)]
+        games = [
+            make_game(1, "team-a", "team-b", 28, 14),  # A beat B at home (H2H favors A)
+            make_game(2, "team-x", "team-a", 28, 14),  # A loses on road (0% away)
+            make_game(3, "team-y", "team-b", 14, 28),  # B wins on road (100% away)
+        ]
+        ratings = {"team-a": 0.700, "team-b": 0.7005, "team-x": 0.5, "team-y": 0.5}
+
+        # Away-first order: B has better away % - B is ahead
+        config_away_first = AlgorithmConfig(tiebreaker_order=["away", "h2h", "sov", "common"])
+        result = resolve_ties_with_config(teams, games, ratings, config_away_first)
+        assert result == ["team-b", "team-a"]
+
+    def test_config_threshold_used(self):
+        """Config tie_threshold is used."""
+        from src.algorithm.tiebreaker import resolve_ties_with_config
+        from src.data.models import AlgorithmConfig
+
+        teams = [("team-a", 0.70), ("team-b", 0.69)]  # 0.01 apart
+        games = [make_game(1, "team-b", "team-a", 28, 14)]  # B beat A
+        ratings = {"team-a": 0.70, "team-b": 0.69}
+
+        # Narrow threshold - not tied, sorted by rating
+        config_narrow = AlgorithmConfig(tie_threshold=0.001)
+        result_narrow = resolve_ties_with_config(teams, games, ratings, config_narrow)
+        assert result_narrow == ["team-a", "team-b"]
+
+        # Wide threshold - tied, B wins H2H
+        config_wide = AlgorithmConfig(tie_threshold=0.02)
+        result_wide = resolve_ties_with_config(teams, games, ratings, config_wide)
+        assert result_wide == ["team-b", "team-a"]

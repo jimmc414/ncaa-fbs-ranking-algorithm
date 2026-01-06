@@ -8,7 +8,7 @@ tiebreaker chain is applied in order:
 4. Away win percentage
 """
 
-from src.data.models import Game
+from src.data.models import AlgorithmConfig, Game
 
 
 def head_to_head(team_a: str, team_b: str, games: list[Game]) -> int:
@@ -323,6 +323,166 @@ def _compare_teams(
     away_b = away_win_percentage(team_b, games)
     if abs(away_a - away_b) > 0.0001:
         return 1 if away_a > away_b else -1
+
+    # All tiebreakers exhausted, still tied
+    return 0
+
+
+def resolve_ties_with_config(
+    teams: list[tuple[str, float]],
+    games: list[Game],
+    ratings: dict[str, float],
+    config: AlgorithmConfig,
+) -> list[str]:
+    """
+    Resolve ties using configurable threshold and tiebreaker order.
+
+    This is the preferred entry point that uses AlgorithmConfig for settings.
+
+    Args:
+        teams: List of (team_id, rating) tuples sorted by rating descending
+        games: List of all games
+        ratings: Dict mapping team_id to rating
+        config: Algorithm configuration with tie_threshold and tiebreaker_order
+
+    Returns:
+        Ordered list of team_ids with ties resolved
+    """
+    if not teams:
+        return []
+
+    if len(teams) == 1:
+        return [teams[0][0]]
+
+    threshold = config.tie_threshold
+    order = config.tiebreaker_order
+
+    # Sort by rating descending first
+    sorted_teams = sorted(teams, key=lambda x: x[1], reverse=True)
+
+    # Group teams that are within threshold of each other
+    groups: list[list[tuple[str, float]]] = []
+    current_group: list[tuple[str, float]] = [sorted_teams[0]]
+
+    for i in range(1, len(sorted_teams)):
+        # Compare to first team in current group
+        if abs(sorted_teams[i][1] - current_group[0][1]) <= threshold:
+            current_group.append(sorted_teams[i])
+        else:
+            groups.append(current_group)
+            current_group = [sorted_teams[i]]
+
+    groups.append(current_group)
+
+    # Resolve each group
+    result: list[str] = []
+    for group in groups:
+        if len(group) == 1:
+            result.append(group[0][0])
+        else:
+            resolved = _resolve_tied_group_with_order(group, games, ratings, order)
+            result.extend(resolved)
+
+    return result
+
+
+def _resolve_tied_group_with_order(
+    group: list[tuple[str, float]],
+    games: list[Game],
+    ratings: dict[str, float],
+    order: list[str],
+) -> list[str]:
+    """
+    Resolve a group of tied teams using configurable tiebreaker order.
+
+    For groups > 2, we do pairwise comparisons and track wins/losses.
+    """
+    if len(group) == 1:
+        return [group[0][0]]
+
+    team_ids = [t[0] for t in group]
+
+    if len(group) == 2:
+        return _resolve_pair_with_order(team_ids[0], team_ids[1], games, ratings, order)
+
+    # For 3+ teams, use pairwise tiebreaker wins
+    tiebreaker_scores: dict[str, float] = {t: 0.0 for t in team_ids}
+
+    for i, team_a in enumerate(team_ids):
+        for team_b in team_ids[i + 1 :]:
+            result = _compare_teams_with_order(team_a, team_b, games, ratings, order)
+            if result > 0:
+                tiebreaker_scores[team_a] += 1
+            elif result < 0:
+                tiebreaker_scores[team_b] += 1
+            else:
+                # Still tied, give half point each
+                tiebreaker_scores[team_a] += 0.5
+                tiebreaker_scores[team_b] += 0.5
+
+    # Sort by tiebreaker score, then by original rating
+    original_ratings = {t[0]: t[1] for t in group}
+    return sorted(
+        team_ids, key=lambda t: (tiebreaker_scores[t], original_ratings[t]), reverse=True
+    )
+
+
+def _resolve_pair_with_order(
+    team_a: str,
+    team_b: str,
+    games: list[Game],
+    ratings: dict[str, float],
+    order: list[str],
+) -> list[str]:
+    """Resolve a two-team tie, returning ordered list."""
+    result = _compare_teams_with_order(team_a, team_b, games, ratings, order)
+    if result >= 0:
+        return [team_a, team_b]
+    return [team_b, team_a]
+
+
+def _compare_teams_with_order(
+    team_a: str,
+    team_b: str,
+    games: list[Game],
+    ratings: dict[str, float],
+    order: list[str],
+) -> int:
+    """
+    Compare two teams using configurable tiebreaker order.
+
+    Args:
+        team_a: First team ID
+        team_b: Second team ID
+        games: List of all games
+        ratings: Dict mapping team_id to rating
+        order: List of tiebreaker methods in order ["h2h", "sov", "common", "away"]
+
+    Returns:
+        1 if team_a wins, -1 if team_b wins, 0 if still tied
+    """
+    for method in order:
+        if method == "h2h":
+            h2h = head_to_head(team_a, team_b, games)
+            if h2h != 0:
+                return h2h
+
+        elif method == "sov":
+            sov_a = strength_of_victory(team_a, games, ratings)
+            sov_b = strength_of_victory(team_b, games, ratings)
+            if abs(sov_a - sov_b) > 0.0001:
+                return 1 if sov_a > sov_b else -1
+
+        elif method == "common":
+            com = common_opponent_margin(team_a, team_b, games)
+            if com != 0:
+                return 1 if com > 0 else -1
+
+        elif method == "away":
+            away_a = away_win_percentage(team_a, games)
+            away_b = away_win_percentage(team_b, games)
+            if abs(away_a - away_b) > 0.0001:
+                return 1 if away_a > away_b else -1
 
     # All tiebreakers exhausted, still tied
     return 0

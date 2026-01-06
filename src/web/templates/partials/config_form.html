@@ -1,0 +1,221 @@
+<style>
+    .config-section {
+        margin-bottom: 25px;
+        padding: 15px;
+        background-color: #f8f9fa;
+        border-radius: 4px;
+    }
+    .config-section h3 {
+        font-size: 1rem;
+        font-weight: 600;
+        color: #1a365d;
+        margin-bottom: 10px;
+        padding-bottom: 5px;
+        border-bottom: 1px solid #ddd;
+    }
+    .config-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 0;
+        border-bottom: 1px solid #eee;
+    }
+    .config-row:last-child {
+        border-bottom: none;
+    }
+    .config-label {
+        font-weight: 500;
+        color: #333;
+    }
+    .config-value {
+        font-family: monospace;
+        color: #2f855a;
+        padding: 4px 8px;
+        background: white;
+        border-radius: 3px;
+    }
+    .config-value.enabled {
+        color: #2f855a;
+    }
+    .config-value.disabled {
+        color: #666;
+    }
+</style>
+
+<div class="config-section">
+    <h3>Core Settings</h3>
+    <div class="config-row">
+        <span class="config-label">max_iterations</span>
+        <span class="config-value">{{ config.max_iterations }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">convergence_threshold</span>
+        <span class="config-value">{{ config.convergence_threshold }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">win_base</span>
+        <span class="config-value">{{ config.win_base }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">margin_weight</span>
+        <span class="config-value">{{ config.margin_weight }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">margin_cap</span>
+        <span class="config-value">{{ config.margin_cap }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">margin_curve</span>
+        <span class="config-value">{{ config.margin_curve }}</span>
+    </div>
+</div>
+
+<div class="config-section">
+    <h3>Venue Adjustments</h3>
+    <div class="config-row">
+        <span class="config-label">venue_road_win</span>
+        <span class="config-value">{{ config.venue_road_win }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">venue_neutral_win</span>
+        <span class="config-value">{{ config.venue_neutral_win }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">venue_home_loss</span>
+        <span class="config-value">{{ config.venue_home_loss }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">venue_neutral_loss</span>
+        <span class="config-value">{{ config.venue_neutral_loss }}</span>
+    </div>
+</div>
+
+<div class="config-section">
+    <h3>Conference Adjustments</h3>
+    <div class="config-row">
+        <span class="config-label">enable_conference_adj</span>
+        <span class="config-value {% if config.enable_conference_adj %}enabled{% else %}disabled{% endif %}">
+            {{ config.enable_conference_adj }}
+        </span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">conference_method</span>
+        <span class="config-value">{{ config.conference_method }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">p5_multiplier</span>
+        <span class="config-value">{{ config.p5_multiplier }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">g5_multiplier</span>
+        <span class="config-value">{{ config.g5_multiplier }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">fcs_multiplier</span>
+        <span class="config-value">{{ config.fcs_multiplier }}</span>
+    </div>
+</div>
+
+<div class="config-section">
+    <h3>Quality Tiers</h3>
+    <div class="config-row">
+        <span class="config-label">enable_quality_tiers</span>
+        <span class="config-value {% if config.enable_quality_tiers %}enabled{% else %}disabled{% endif %}">
+            {{ config.enable_quality_tiers }}
+        </span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">elite_threshold</span>
+        <span class="config-value">{{ config.elite_threshold }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">elite_win_bonus</span>
+        <span class="config-value">{{ config.elite_win_bonus }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">bad_threshold</span>
+        <span class="config-value">{{ config.bad_threshold }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">bad_loss_penalty</span>
+        <span class="config-value">{{ config.bad_loss_penalty }}</span>
+    </div>
+</div>
+
+<div class="config-section">
+    <h3>Recency Weighting</h3>
+    <div class="config-row">
+        <span class="config-label">enable_recency</span>
+        <span class="config-value {% if config.enable_recency %}enabled{% else %}disabled{% endif %}">
+            {{ config.enable_recency }}
+        </span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">recency_half_life</span>
+        <span class="config-value">{{ config.recency_half_life }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">recency_min_weight</span>
+        <span class="config-value">{{ config.recency_min_weight }}</span>
+    </div>
+</div>
+
+<div class="config-section">
+    <h3>Schedule Strength</h3>
+    <div class="config-row">
+        <span class="config-label">sos_adjustment_weight</span>
+        <span class="config-value">{{ config.sos_adjustment_weight }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">sos_method</span>
+        <span class="config-value">{{ config.sos_method }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">min_sos_top_10</span>
+        <span class="config-value">{{ config.min_sos_top_10 }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">min_sos_top_25</span>
+        <span class="config-value">{{ config.min_sos_top_25 }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">min_p5_games_top_10</span>
+        <span class="config-value">{{ config.min_p5_games_top_10 }}</span>
+    </div>
+</div>
+
+<div class="config-section">
+    <h3>Tiebreakers</h3>
+    <div class="config-row">
+        <span class="config-label">tie_threshold</span>
+        <span class="config-value">{{ config.tie_threshold }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">tiebreaker_order</span>
+        <span class="config-value">{{ config.tiebreaker_order | join(", ") }}</span>
+    </div>
+</div>
+
+<div class="config-section">
+    <h3>Game Filters</h3>
+    <div class="config-row">
+        <span class="config-label">include_postseason</span>
+        <span class="config-value {% if config.include_postseason %}enabled{% else %}disabled{% endif %}">
+            {{ config.include_postseason }}
+        </span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">postseason_weight</span>
+        <span class="config-value">{{ config.postseason_weight }}</span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">include_fcs_games</span>
+        <span class="config-value {% if config.include_fcs_games %}enabled{% else %}disabled{% endif %}">
+            {{ config.include_fcs_games }}
+        </span>
+    </div>
+    <div class="config-row">
+        <span class="config-label">min_games_to_rank</span>
+        <span class="config-value">{{ config.min_games_to_rank }}</span>
+    </div>
+</div>

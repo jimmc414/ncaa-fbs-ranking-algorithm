@@ -14,7 +14,7 @@ CRITICAL: Losses SUBTRACT opponent rating, not add. This ensures:
 from dataclasses import dataclass
 
 from src.algorithm.game_grade import compute_game_grade_for_result
-from src.data.models import AlgorithmConfig, Game, GameResult
+from src.data.models import AlgorithmConfig, Game, GameResult, Team
 
 
 @dataclass
@@ -25,6 +25,47 @@ class ConvergenceResult:
     iterations: int
     final_max_delta: float
     delta_history: list[float]
+
+
+def build_conference_multipliers(
+    teams: list[Team] | None,
+    config: AlgorithmConfig,
+) -> dict[str, float]:
+    """
+    Build a mapping of team_id -> conference multiplier.
+
+    Args:
+        teams: List of Team objects with conference info
+        config: Algorithm configuration with multiplier values
+
+    Returns:
+        Dict mapping team_id to its conference multiplier
+    """
+    if not teams or not config.enable_conference_adj:
+        return {}
+
+    # P5 conferences
+    p5_conferences = {
+        "SEC", "Big Ten", "Big 12", "ACC", "Pac-12", "FBS Independents",
+    }
+    g5_conferences = {
+        "American Athletic", "Mountain West", "Sun Belt", "MAC",
+        "Mid-American", "Conference USA",
+    }
+
+    multipliers = {}
+    for team in teams:
+        if team.division == "fcs":
+            multipliers[team.team_id] = config.fcs_multiplier
+        elif team.conference in p5_conferences:
+            multipliers[team.team_id] = config.p5_multiplier
+        elif team.conference in g5_conferences:
+            multipliers[team.team_id] = config.g5_multiplier
+        else:
+            # Unknown conference defaults to G5
+            multipliers[team.team_id] = config.g5_multiplier
+
+    return multipliers
 
 
 def initialize_ratings(games: list[Game]) -> dict[str, float]:
@@ -67,6 +108,8 @@ def iterate_once(
     game_results: dict[str, list[GameResult]],
     config: AlgorithmConfig,
     fcs_teams: set[str] | None = None,
+    normalized_ratings: dict[str, float] | None = None,
+    conference_multipliers: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """
     Perform one iteration of rating updates.
@@ -82,17 +125,26 @@ def iterate_once(
         - L_i is 1 if loss, 0 otherwise
         - R_opp_i is opponent's current rating
 
+    Configurable modifiers:
+        - opponent_weight: Multiplier on opponent rating
+        - loss_opponent_factor: Factor for loss contribution (default -1.0)
+        - quality_tiers: Bonuses for elite wins, penalties for bad losses
+        - conference_multipliers: P5/G5/FCS adjustments to opponent rating
+
     Args:
         current_ratings: Current team ratings
         game_results: Game results by team
         config: Algorithm configuration
         fcs_teams: Set of FCS team IDs (optional)
+        normalized_ratings: Normalized [0,1] ratings for quality tier comparison
+        conference_multipliers: Dict mapping team_id to conference multiplier
 
     Returns:
         New ratings dict
     """
     new_ratings = {}
     fcs_teams = fcs_teams or set()
+    conference_multipliers = conference_multipliers or {}
 
     # CRITICAL: Process teams in sorted order for determinism
     for team_id in sorted(current_ratings.keys()):
@@ -111,11 +163,29 @@ def iterate_once(
             game_grade = compute_game_grade_for_result(result, config)
             opp_rating = current_ratings[result.opponent_id]
 
-            # CRITICAL: Losses SUBTRACT opponent rating
+            # Apply conference multiplier to opponent rating (G5 opponents worth less)
+            conf_mult = conference_multipliers.get(result.opponent_id, 1.0)
+            opp_rating = opp_rating * conf_mult
+
+            # Apply opponent weight
+            weighted_opp_rating = opp_rating * config.opponent_weight
+
+            # CRITICAL: Losses SUBTRACT opponent rating (with configurable factor)
             if result.is_win:
-                contribution = game_grade + opp_rating
+                contribution = game_grade + weighted_opp_rating
             else:
-                contribution = game_grade - opp_rating
+                # loss_opponent_factor is typically -1.0, subtracting opp rating
+                contribution = game_grade + (config.loss_opponent_factor * weighted_opp_rating)
+
+            # Apply quality tier bonuses/penalties if enabled
+            if config.enable_quality_tiers and normalized_ratings:
+                norm_opp = normalized_ratings.get(result.opponent_id, 0.5)
+                if result.is_win and norm_opp >= config.elite_threshold:
+                    # Bonus for beating elite opponent
+                    contribution += config.elite_win_bonus
+                elif not result.is_win and norm_opp <= config.bad_threshold:
+                    # Penalty for losing to bad opponent
+                    contribution -= config.bad_loss_penalty
 
             total += contribution
 
@@ -128,6 +198,7 @@ def converge(
     games: list[Game],
     config: AlgorithmConfig,
     fcs_teams: set[str] | None = None,
+    teams: list[Team] | None = None,
 ) -> ConvergenceResult:
     """
     Run iterative convergence until ratings stabilize.
@@ -141,6 +212,7 @@ def converge(
         games: List of games
         config: Algorithm configuration
         fcs_teams: Set of FCS team IDs (optional)
+        teams: List of Team objects for conference multipliers (optional)
 
     Returns:
         ConvergenceResult with final ratings and diagnostics
@@ -160,8 +232,21 @@ def converge(
     ratings = initialize_ratings(games)
     delta_history: list[float] = []
 
+    # Build conference multipliers if teams provided
+    conference_multipliers = build_conference_multipliers(teams, config)
+
+    # For quality tiers, we need normalized ratings from previous iteration
+    normalized_ratings: dict[str, float] | None = None
+
     for iteration in range(config.max_iterations):
-        new_ratings = iterate_once(ratings, game_results, config, fcs_teams)
+        # If quality tiers enabled, normalize current ratings for tier comparison
+        if config.enable_quality_tiers:
+            normalized_ratings = normalize_ratings(ratings)
+
+        new_ratings = iterate_once(
+            ratings, game_results, config, fcs_teams, normalized_ratings,
+            conference_multipliers
+        )
 
         # Compute max delta
         max_delta = max(

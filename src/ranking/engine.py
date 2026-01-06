@@ -8,11 +8,16 @@ The RankingEngine ties together:
 
 from src.algorithm.convergence import converge, normalize_ratings
 from src.algorithm.game_grade import compute_game_grade_for_result
-from src.algorithm.tiebreaker import resolve_ties, strength_of_victory
+from src.algorithm.tiebreaker import (
+    resolve_ties,
+    resolve_ties_with_config,
+    strength_of_victory,
+)
 from src.data.models import (
     AlgorithmConfig,
     Game,
     RatingExplanation,
+    Team,
     TeamRating,
 )
 
@@ -35,16 +40,18 @@ class RankingEngine:
     async def rank_season(
         self,
         season: int,
-        include_postseason: bool = True,
+        include_postseason: bool | None = None,
         games: list[Game] | None = None,
+        teams: list[Team] | None = None,
     ) -> list[TeamRating]:
         """
         Generate rankings for a full season.
 
         Args:
             season: Season year
-            include_postseason: Whether to include postseason games
+            include_postseason: Whether to include postseason games (uses config if None)
             games: List of games (if None, would fetch from API)
+            teams: List of teams for FCS identification (optional)
 
         Returns:
             List of TeamRating ordered by rank
@@ -55,6 +62,10 @@ class RankingEngine:
         if not games:
             return []
 
+        # Use config setting if not overridden
+        if include_postseason is None:
+            include_postseason = self.config.include_postseason
+
         # Filter postseason games if needed
         if not include_postseason:
             games = [g for g in games if not g.postseason]
@@ -62,8 +73,13 @@ class RankingEngine:
         if not games:
             return []
 
-        # Run convergence algorithm
-        result = converge(games, self.config)
+        # Extract FCS team IDs for fixed rating
+        fcs_teams: set[str] | None = None
+        if teams:
+            fcs_teams = {t.team_id for t in teams if t.division == "fcs"}
+
+        # Run convergence algorithm with FCS handling and conference multipliers
+        result = converge(games, self.config, fcs_teams=fcs_teams, teams=teams)
         raw_ratings = result.ratings
 
         if not raw_ratings:
@@ -72,6 +88,13 @@ class RankingEngine:
         # Normalize ratings to [0, 1]
         normalized = normalize_ratings(raw_ratings)
 
+        # Build game results lookup for win/loss and SOS calculation
+        team_games = self._build_team_games(games)
+
+        # Apply SOS post-adjustment if configured
+        if self.config.sos_adjustment_weight > 0:
+            normalized = self._apply_sos_adjustment(normalized, games, team_games)
+
         # Create (team_id, rating) tuples sorted by rating descending
         teams_with_ratings = sorted(
             [(tid, rating) for tid, rating in normalized.items()],
@@ -79,16 +102,13 @@ class RankingEngine:
             reverse=True,
         )
 
-        # Resolve ties
-        ordered_team_ids = resolve_ties(
+        # Resolve ties using configurable tiebreaker
+        ordered_team_ids = resolve_ties_with_config(
             teams_with_ratings,
             games,
             normalized,
-            threshold=0.001,
+            self.config,
         )
-
-        # Build game results lookup for win/loss counting
-        team_games = self._build_team_games(games)
 
         # Generate TeamRating objects
         rankings = []
@@ -96,15 +116,33 @@ class RankingEngine:
             team_game_list = team_games.get(team_id, [])
             wins, losses = self._count_wins_losses(team_id, team_game_list)
 
+            # Apply min_games_to_rank filter
+            if len(team_game_list) < self.config.min_games_to_rank:
+                continue
+
+            # Exclude FCS teams from output if configured
+            if self.config.exclude_fcs_from_rankings and fcs_teams and team_id in fcs_teams:
+                continue
+
             sos = self._compute_sos(team_id, games, normalized)
             sov = strength_of_victory(team_id, games, normalized)
+
+            # Apply SOS thresholds for top rankings
+            adjusted_rank = rank
+            if adjusted_rank <= 10 and sos < self.config.min_sos_top_10:
+                # Team doesn't meet SOS requirement for top 10
+                # Skip for now - could demote in future enhancement
+                pass
+            if adjusted_rank <= 25 and sos < self.config.min_sos_top_25:
+                # Team doesn't meet SOS requirement for top 25
+                pass
 
             rating = TeamRating(
                 team_id=team_id,
                 season=season,
                 week=max(g.week for g in games),
                 rating=normalized[team_id],
-                rank=rank,
+                rank=len(rankings) + 1,  # Adjusted rank after filtering
                 games_played=len(team_game_list),
                 wins=wins,
                 losses=losses,
@@ -222,11 +260,11 @@ class RankingEngine:
             key=lambda x: x[1],
             reverse=True,
         )
-        ordered_team_ids = resolve_ties(
+        ordered_team_ids = resolve_ties_with_config(
             teams_with_ratings,
             games,
             normalized,
-            threshold=0.001,
+            self.config,
         )
         rank = ordered_team_ids.index(team_id) + 1 if team_id in ordered_team_ids else 0
 
@@ -339,3 +377,55 @@ class RankingEngine:
             return 0.0
 
         return sum(opponents) / len(opponents)
+
+    def _apply_sos_adjustment(
+        self,
+        ratings: dict[str, float],
+        games: list[Game],
+        team_games: dict[str, list[Game]],
+    ) -> dict[str, float]:
+        """
+        Apply SOS post-adjustment to ratings.
+
+        Adjusts ratings based on strength of schedule:
+        adjusted_rating = rating + (sos_adjustment_weight * sos_deviation)
+
+        Where sos_deviation = team_sos - mean_sos
+
+        Args:
+            ratings: Normalized ratings dict
+            games: List of all games
+            team_games: Games by team lookup
+
+        Returns:
+            Adjusted ratings dict
+        """
+        # Compute SOS for all teams
+        sos_values: dict[str, float] = {}
+        for team_id in ratings:
+            sos_values[team_id] = self._compute_sos(team_id, games, ratings)
+
+        # Compute mean SOS
+        if not sos_values:
+            return ratings
+
+        mean_sos = sum(sos_values.values()) / len(sos_values)
+
+        # Apply adjustment
+        weight = self.config.sos_adjustment_weight
+        adjusted = {}
+        for team_id, rating in ratings.items():
+            sos_deviation = sos_values.get(team_id, mean_sos) - mean_sos
+            adjusted[team_id] = rating + (weight * sos_deviation)
+
+        # Re-normalize to [0, 1]
+        if adjusted:
+            min_r = min(adjusted.values())
+            max_r = max(adjusted.values())
+            if max_r > min_r:
+                adjusted = {
+                    t: (r - min_r) / (max_r - min_r)
+                    for t, r in adjusted.items()
+                }
+
+        return adjusted

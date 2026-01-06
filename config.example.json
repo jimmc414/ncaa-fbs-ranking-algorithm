@@ -1,0 +1,72 @@
+{
+    "_comment": "NCAA FBS Ranking Algorithm Configuration - All 44 Levers",
+    "_docs": "See CONFIG_REFERENCE.md for detailed documentation of each setting",
+
+    "___CONVERGENCE___": "=== Core Algorithm Settings ===",
+    "max_iterations": 100,
+    "convergence_threshold": 0.0001,
+
+    "___GAME_GRADE___": "=== How individual games are scored ===",
+    "win_base": 0.70,
+    "margin_weight": 0.20,
+    "margin_cap": 28,
+    "margin_curve": "log",
+
+    "___VENUE___": "=== Home/Away/Neutral adjustments ===",
+    "venue_road_win": 0.10,
+    "venue_neutral_win": 0.05,
+    "venue_home_loss": -0.03,
+    "venue_neutral_loss": -0.01,
+
+    "___INITIALIZATION___": "=== Starting ratings ===",
+    "initial_rating": 0.500,
+    "fcs_fixed_rating": 0.20,
+
+    "___OPPONENT___": "=== How opponent strength affects rating ===",
+    "opponent_weight": 1.0,
+    "loss_opponent_factor": -1.0,
+    "second_order_weight": 0.0,
+
+    "___CONFERENCE___": "=== P5/G5/FCS tier adjustments ===",
+    "enable_conference_adj": false,
+    "conference_method": "empirical",
+    "p5_multiplier": 1.0,
+    "g5_multiplier": 1.0,
+    "fcs_multiplier": 0.5,
+
+    "___SCHEDULE_STRENGTH___": "=== SOS requirements and adjustments ===",
+    "sos_adjustment_weight": 0.0,
+    "sos_method": "mean",
+    "min_sos_top_10": 0.0,
+    "min_sos_top_25": 0.0,
+    "min_p5_games_top_10": 0,
+
+    "___QUALITY_TIERS___": "=== Bonuses/penalties for elite wins and bad losses ===",
+    "enable_quality_tiers": false,
+    "elite_threshold": 0.80,
+    "good_threshold": 0.55,
+    "bad_threshold": 0.35,
+    "elite_win_bonus": 0.0,
+    "bad_loss_penalty": 0.0,
+
+    "___RECENCY___": "=== Weight recent games more heavily ===",
+    "enable_recency": false,
+    "recency_half_life": 8,
+    "recency_min_weight": 0.5,
+
+    "___PRIOR___": "=== Preseason expectations influence ===",
+    "enable_prior": false,
+    "prior_weight": 0.0,
+    "prior_decay_weeks": 8,
+
+    "___TIEBREAKERS___": "=== How ties are resolved ===",
+    "tie_threshold": 0.001,
+    "tiebreaker_order": ["h2h", "sov", "common", "away"],
+
+    "___FILTERS___": "=== What games/teams to include ===",
+    "include_postseason": true,
+    "postseason_weight": 1.0,
+    "include_fcs_games": true,
+    "exclude_fcs_from_rankings": false,
+    "min_games_to_rank": 1
+}

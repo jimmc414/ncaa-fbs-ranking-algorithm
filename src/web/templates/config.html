@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Configuration - NCAA Rankings{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2 class="section-title">Algorithm Configuration</h2>
+    <p style="color: #666; margin-bottom: 20px;">
+        Configure the ranking algorithm parameters. Select a preset profile or customize individual settings.
+    </p>
+
+    <div class="controls">
+        <label for="profile-select">Profile:</label>
+        <select id="profile-select"
+                hx-get="/config/profile/{value}"
+                hx-target="#config-form"
+                hx-trigger="change"
+                hx-swap="innerHTML">
+            <option value="default" {% if selected_profile == 'default' %}selected{% endif %}>Default</option>
+            {% for profile in profiles %}
+            <option value="{{ profile.name }}" {% if selected_profile == profile.name %}selected{% endif %}>
+                {{ profile.name }}
+            </option>
+            {% endfor %}
+        </select>
+        <span class="htmx-indicator loading">Loading...</span>
+    </div>
+
+    <div class="profiles-info" style="margin-bottom: 30px;">
+        <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 10px;">Available Profiles:</h3>
+        <ul style="list-style: none; padding-left: 0;">
+            {% for profile in profiles %}
+            <li style="margin-bottom: 8px;">
+                <strong>{{ profile.name }}</strong>: {{ profile.description }}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div id="config-form">
+        {% include "partials/config_form.html" %}
+    </div>
+</div>
+{% endblock %}

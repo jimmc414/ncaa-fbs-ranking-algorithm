@@ -202,7 +202,7 @@ class CFBDataClient:
         # Parse and filter
         teams = []
         for item in data:
-            classification = item.get("classification", "").lower()
+            classification = (item.get("classification") or "").lower()
             if fbs_only and classification != "fbs":
                 continue
 
@@ -359,3 +359,261 @@ class CFBDataClient:
             await self.storage.set_cached(cache_key, rankings, ttl_hours=24)
 
         return rankings
+
+    # =========================================================================
+    # Validator Data Endpoints
+    # =========================================================================
+
+    async def fetch_sp_ratings(self, season: int) -> list[dict]:
+        """
+        Fetch SP+ ratings for a season.
+
+        Args:
+            season: Season year (e.g., 2024)
+
+        Returns:
+            List of dicts with keys: team_id, rating, ranking, offense, defense
+        """
+        cache_key = f"sp_ratings_{season}"
+
+        # Check cache first
+        if self.storage:
+            cached = await self.storage.get_cached(cache_key)
+            if cached:
+                return cached
+
+        # Fetch from API
+        data = await self._make_request("/ratings/sp", params={"year": season})
+
+        # Parse ratings
+        ratings = []
+        for item in data:
+            team_name = item.get("team")
+            if not team_name:
+                continue
+
+            ratings.append({
+                "team_id": self._normalize_team_id(team_name),
+                "rating": item.get("rating"),
+                "ranking": item.get("ranking"),
+                "offense": item.get("offense", {}).get("rating") if isinstance(item.get("offense"), dict) else item.get("offense"),
+                "defense": item.get("defense", {}).get("rating") if isinstance(item.get("defense"), dict) else item.get("defense"),
+            })
+
+        # Cache the result
+        if self.storage:
+            await self.storage.set_cached(cache_key, ratings, ttl_hours=24)
+
+        return ratings
+
+    async def fetch_srs_ratings(self, season: int) -> list[dict]:
+        """
+        Fetch Simple Rating System (SRS) ratings for a season.
+
+        SRS = Average margin of victory + strength of schedule adjustment.
+
+        Args:
+            season: Season year (e.g., 2024)
+
+        Returns:
+            List of dicts with keys: team_id, rating, ranking
+        """
+        cache_key = f"srs_ratings_{season}"
+
+        # Check cache first
+        if self.storage:
+            cached = await self.storage.get_cached(cache_key)
+            if cached:
+                return cached
+
+        # Fetch from API
+        data = await self._make_request("/ratings/srs", params={"year": season})
+
+        # Parse ratings
+        ratings = []
+        for item in data:
+            team_name = item.get("team")
+            if not team_name:
+                continue
+
+            ratings.append({
+                "team_id": self._normalize_team_id(team_name),
+                "rating": item.get("rating"),
+                "ranking": item.get("ranking"),
+            })
+
+        # Cache the result
+        if self.storage:
+            await self.storage.set_cached(cache_key, ratings, ttl_hours=24)
+
+        return ratings
+
+    async def fetch_elo_ratings(self, season: int) -> list[dict]:
+        """
+        Fetch Elo ratings for a season.
+
+        Elo is a historical program strength metric that carries year-to-year.
+
+        Args:
+            season: Season year (e.g., 2024)
+
+        Returns:
+            List of dicts with keys: team_id, elo
+        """
+        cache_key = f"elo_ratings_{season}"
+
+        # Check cache first
+        if self.storage:
+            cached = await self.storage.get_cached(cache_key)
+            if cached:
+                return cached
+
+        # Fetch from API
+        data = await self._make_request("/ratings/elo", params={"year": season})
+
+        # Parse ratings
+        ratings = []
+        for item in data:
+            team_name = item.get("team")
+            if not team_name:
+                continue
+
+            ratings.append({
+                "team_id": self._normalize_team_id(team_name),
+                "elo": item.get("elo"),
+            })
+
+        # Cache the result
+        if self.storage:
+            await self.storage.set_cached(cache_key, ratings, ttl_hours=24)
+
+        return ratings
+
+    async def fetch_betting_lines(
+        self,
+        season: int,
+        week: int | None = None,
+    ) -> list[dict]:
+        """
+        Fetch Vegas betting lines for games.
+
+        Args:
+            season: Season year (e.g., 2024)
+            week: Optional week number (if None, fetches all weeks)
+
+        Returns:
+            List of dicts with keys: game_id, home_team_id, away_team_id,
+            spread, over_under, home_moneyline, away_moneyline, provider
+        """
+        cache_key = f"betting_lines_{season}_{week or 'all'}"
+
+        # Check cache first
+        if self.storage:
+            cached = await self.storage.get_cached(cache_key)
+            if cached:
+                return cached
+
+        # Fetch from API
+        params = {"year": season}
+        if week is not None:
+            params["week"] = week
+
+        data = await self._make_request("/lines", params=params)
+
+        # Parse lines - each game may have multiple providers
+        lines = []
+        for item in data:
+            game_id = item.get("id")
+            home_team = item.get("homeTeam")
+            away_team = item.get("awayTeam")
+
+            if not all([game_id, home_team, away_team]):
+                continue
+
+            # Get lines from all providers, prefer DraftKings or consensus
+            game_lines = item.get("lines", [])
+            if not game_lines:
+                continue
+
+            # Find best line (prefer DraftKings, then first available)
+            best_line = None
+            for line in game_lines:
+                if line.get("provider") == "DraftKings":
+                    best_line = line
+                    break
+            if best_line is None and game_lines:
+                best_line = game_lines[0]
+
+            if best_line:
+                lines.append({
+                    "game_id": game_id,
+                    "home_team_id": self._normalize_team_id(home_team),
+                    "away_team_id": self._normalize_team_id(away_team),
+                    "spread": best_line.get("spread"),  # Negative = home favored
+                    "formatted_spread": best_line.get("formattedSpread"),
+                    "over_under": best_line.get("overUnder"),
+                    "home_moneyline": best_line.get("homeMoneyline"),
+                    "away_moneyline": best_line.get("awayMoneyline"),
+                    "provider": best_line.get("provider"),
+                })
+
+        # Cache the result (shorter TTL - lines change frequently)
+        if self.storage:
+            await self.storage.set_cached(cache_key, lines, ttl_hours=1)
+
+        return lines
+
+    async def fetch_pregame_wp(
+        self,
+        season: int,
+        week: int | None = None,
+    ) -> list[dict]:
+        """
+        Fetch pre-game win probability from betting markets.
+
+        Args:
+            season: Season year (e.g., 2024)
+            week: Optional week number (if None, fetches all weeks)
+
+        Returns:
+            List of dicts with keys: game_id, home_team_id, away_team_id,
+            home_win_prob, spread
+        """
+        cache_key = f"pregame_wp_{season}_{week or 'all'}"
+
+        # Check cache first
+        if self.storage:
+            cached = await self.storage.get_cached(cache_key)
+            if cached:
+                return cached
+
+        # Fetch from API
+        params = {"year": season}
+        if week is not None:
+            params["week"] = week
+
+        data = await self._make_request("/metrics/wp/pregame", params=params)
+
+        # Parse win probabilities
+        wp_data = []
+        for item in data:
+            game_id = item.get("gameId")
+            home_team = item.get("homeTeam")
+            away_team = item.get("awayTeam")
+
+            if not all([game_id, home_team, away_team]):
+                continue
+
+            wp_data.append({
+                "game_id": game_id,
+                "home_team_id": self._normalize_team_id(home_team),
+                "away_team_id": self._normalize_team_id(away_team),
+                "home_win_prob": item.get("homeWinProbability"),
+                "spread": item.get("spread"),
+            })
+
+        # Cache the result (shorter TTL)
+        if self.storage:
+            await self.storage.set_cached(cache_key, wp_data, ttl_hours=1)
+
+        return wp_data
