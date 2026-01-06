@@ -220,139 +220,289 @@ cp .env.example .env
 
 ## CLI Commands
 
-### Generate Rankings
+### rank
+
+Generate rankings for a season using the iterative convergence algorithm.
 
 ```bash
-# Top 25 for current season
+ncaa-rank rank <season> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--week` | `-w` | Calculate rankings as of this week (default: full season) |
+| `--top` | `-t` | Number of teams to display (default: 25) |
+| `--profile` | `-p` | Configuration profile: `pure_results`, `balanced`, `predictive`, `tuned_predictive`, `conservative` |
+| `--config` | `-c` | Path to custom JSON config file |
+| `--exclude-fcs` | | Hide FCS teams from output (they're still used in calculations) |
+
+```bash
+# Examples
 ncaa-rank rank 2024 --top 25
-
-# Rankings as of week 10
-ncaa-rank rank 2024 --week 10 --top 25
-
-# Use predictive profile (optimized for forecasting)
-ncaa-rank rank 2024 --profile predictive
-
-# Use custom configuration
-ncaa-rank rank 2024 --config my_config.json
-
-# Exclude FCS teams from output
-ncaa-rank rank 2024 --exclude-fcs
+ncaa-rank rank 2024 --week 10 --profile predictive
+ncaa-rank rank 2024 --config my_config.json --exclude-fcs
 ```
 
-### Predict Games
+### predict
+
+Predict outcomes for all games in a specific week. Uses our algorithm's ratings to calculate win probabilities.
 
 ```bash
-# Predict all games in week 12
+ncaa-rank predict <season> <week> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--profile` | `-p` | Configuration profile to use |
+| `--config` | `-c` | Path to custom JSON config file |
+| `--min-confidence` | | Only show predictions above this probability (0.0-1.0) |
+| `--consensus` | | Show consensus view blending Vegas, SP+, Elo, pregame WP |
+| `--high-confidence` | | Only show HIGH confidence predictions (all sources agree, <10% spread) |
+| `--show-splits` | | Only show games where sources disagree on the winner |
+
+```bash
+# Examples
 ncaa-rank predict 2024 12
-
-# Consensus view with all sources
-ncaa-rank predict 2024 12 --consensus
-
-# Only high confidence predictions
-ncaa-rank predict 2024 12 --high-confidence
-
-# Only games where sources disagree
+ncaa-rank predict 2024 12 --consensus --high-confidence
 ncaa-rank predict 2024 12 --show-splits
+ncaa-rank predict 2024 12 --min-confidence 0.65
 ```
 
-### Single Game Prediction
+### predict-game
+
+Predict a single game showing all available sources side-by-side. Displays our algorithm, Vegas spread, pregame win probability, SP+ implied, and Elo implied probabilities.
 
 ```bash
-# Predict a specific matchup
+ncaa-rank predict-game <team1> <team2> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--season` | `-s` | Season year (default: current) |
+| `--week` | `-w` | Week number (for fetching current lines) |
+| `--neutral` | `-n` | Treat as neutral site game (no home advantage) |
+| `--profile` | `-p` | Configuration profile |
+| `--config` | `-c` | Path to custom JSON config file |
+
+Team names can be quoted full names ("Ohio State") or hyphenated IDs (ohio-state).
+
+```bash
+# Examples
 ncaa-rank predict-game "Ohio State" "Michigan" --season 2024
-
-# Neutral site game
-ncaa-rank predict-game "Georgia" "Alabama" --neutral
-
-# Shows all sources: Vegas, our algorithm, pregame WP, SP+, Elo
+ncaa-rank predict-game georgia alabama --neutral
+ncaa-rank predict-game "Texas" "Oklahoma" -s 2024 -w 12
 ```
 
-### Validate Rankings
+### validate
 
-Compare our rankings against external validators:
+Compare our rankings against external validators (SP+, SRS, Elo). Calculates Spearman correlation and flags teams where rankings diverge significantly.
 
 ```bash
-# Full validation report
+ncaa-rank validate <season> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--week` | `-w` | Validate rankings as of this week |
+| `--profile` | `-p` | Configuration profile |
+| `--config` | `-c` | Path to custom JSON config file |
+| `--threshold` | `-t` | Rank gap to flag as discrepancy (default: 20) |
+| `--team` | | Show detailed validation for a specific team |
+| `--source` | `-s` | Compare against specific source only: `sp`, `srs`, or `elo` |
+
+```bash
+# Examples
 ncaa-rank validate 2024
-
-# Single team deep dive
+ncaa-rank validate 2024 --threshold 15 --source sp
 ncaa-rank validate 2024 --team ohio-state
-
-# Lower threshold for flagging discrepancies
-ncaa-rank validate 2024 --threshold 15
+ncaa-rank validate 2024 --week 10 --profile predictive
 ```
 
-### Vegas Upset Analysis
+### vegas-analysis
 
-Find patterns in games where Vegas favorites lost:
+Analyze games where Vegas favorites lost outright. Identifies patterns and anomalies, tracks which upsets our algorithm correctly predicted.
 
 ```bash
-# Full season analysis
+ncaa-rank vegas-analysis <season> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--week` | `-w` | Analyze specific week only |
+| `--min-spread` | `-m` | Minimum point spread to consider (default: 3.0, filters toss-ups) |
+| `--we-got-right` | | Only show upsets our algorithm correctly predicted |
+| `--profile` | `-p` | Configuration profile |
+| `--config` | `-c` | Path to custom JSON config file |
+| `--export` | `-e` | Export results to JSON file |
+
+```bash
+# Examples
 ncaa-rank vegas-analysis 2024
-
-# Only upsets we correctly predicted
-ncaa-rank vegas-analysis 2024 --we-got-right
-
-# Filter to bigger upsets (min 7-point favorites)
-ncaa-rank vegas-analysis 2024 --min-spread 7
-
-# Export to JSON
-ncaa-rank vegas-analysis 2024 --export analysis.json
+ncaa-rank vegas-analysis 2024 --min-spread 7 --we-got-right
+ncaa-rank vegas-analysis 2024 --week 12 --export upsets.json
 ```
 
-### Team Analysis
+### decompose
+
+Show detailed contribution breakdown for each game in a team's season. Diagnostic view showing how each game affects the final rating.
 
 ```bash
-# Detailed rating breakdown
+ncaa-rank decompose <season> <team> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--profile` | `-p` | Configuration profile |
+| `--config` | `-c` | Path to custom JSON config file |
+
+```bash
+# Examples
 ncaa-rank decompose 2024 ohio-state
+ncaa-rank decompose 2024 "Notre Dame" --profile predictive
+```
 
-# Explain how rating was computed
+### explain
+
+Show detailed rating breakdown for a team including record, strength of schedule, and key wins/losses.
+
+```bash
+ncaa-rank explain <season> <team> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--week` | `-w` | Explain rating as of this week |
+
+```bash
+# Examples
 ncaa-rank explain 2024 ohio-state
+ncaa-rank explain 2024 georgia --week 10
 ```
 
-### Diagnostics
+### diagnose
+
+Analyze prediction accuracy and calibration. Shows Brier score, calibration error by probability bucket, and biggest upsets.
 
 ```bash
-# Prediction accuracy and calibration
+ncaa-rank diagnose <season> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--week` | `-w` | Analyze through this week only |
+| `--profile` | `-p` | Configuration profile |
+| `--config` | `-c` | Path to custom JSON config file |
+| `--upsets` | `-u` | Number of biggest upsets to show (default: 5) |
+| `--attributions` | `-a` | Number of parameter attributions to show (default: 5) |
+
+```bash
+# Examples
 ncaa-rank diagnose 2024 --profile predictive
-
-# Shows Brier score, calibration error, biggest upsets
+ncaa-rank diagnose 2024 --upsets 10 --attributions 10
 ```
 
-### Compare to Polls
+### compare
+
+Compare algorithm rankings to human polls (AP, CFP, Coaches).
 
 ```bash
-# Compare to AP Poll
+ncaa-rank compare <season> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--poll` | `-p` | Poll to compare: `ap` (default), `cfp`, or `coaches` |
+| `--week` | `-w` | Compare for specific week |
+
+```bash
+# Examples
 ncaa-rank compare 2024 --poll ap
-
-# Compare to CFP rankings
-ncaa-rank compare 2024 --poll cfp
+ncaa-rank compare 2024 --poll cfp --week 15
 ```
 
-### Configuration Management
+### export
+
+Export rankings to CSV or JSON file.
 
 ```bash
-# List available profiles
-ncaa-rank config list
-
-# Show profile settings
-ncaa-rank config show predictive
-
-# Export profile to JSON for customization
-ncaa-rank config export my_config.json --profile predictive
-
-# Create documented config file
-ncaa-rank config create my_config.json --documented
+ncaa-rank export <season> [options]
 ```
 
-### Export
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--format` | `-f` | Output format: `csv` (default) or `json` |
+| `--output` | `-o` | Output file path |
+| `--week` | `-w` | Export rankings as of this week |
+| `--top` | `-t` | Number of teams to export (default: 25) |
 
 ```bash
-# Export rankings to CSV
+# Examples
 ncaa-rank export 2024 --format csv --output rankings.csv
+ncaa-rank export 2024 --format json --top 130
+ncaa-rank export 2024 --week 10 -o week10.csv
+```
 
-# Export to JSON
-ncaa-rank export 2024 --format json
+### config
+
+Configuration management subcommands.
+
+#### config list
+
+List all available configuration profiles.
+
+```bash
+ncaa-rank config list
+```
+
+#### config show
+
+Show configuration settings for a profile or the defaults.
+
+```bash
+ncaa-rank config show [profile]
+```
+
+```bash
+# Examples
+ncaa-rank config show              # Show default values
+ncaa-rank config show predictive   # Show predictive profile
+```
+
+#### config export
+
+Export a configuration profile to a JSON file.
+
+```bash
+ncaa-rank config export <output> [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--profile` | `-p` | Profile to export (default: defaults) |
+
+```bash
+# Examples
+ncaa-rank config export my_config.json
+ncaa-rank config export tuned.json --profile tuned_predictive
+```
+
+#### config create
+
+Create a new configuration file with all levers documented as comments.
+
+```bash
+ncaa-rank config create [output] [options]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--profile` | `-p` | Base profile to start from |
+| `--documented` | `-d` | Include section comments (default: true) |
+
+```bash
+# Examples
+ncaa-rank config create my_config.json
+ncaa-rank config create custom.json --profile predictive
 ```
 
 ---
@@ -432,18 +582,83 @@ For **predictions**, we blend multiple sources including Vegas lines. This is ap
 
 ### External Validators
 
-| Source | Description |
-|--------|-------------|
-| SP+ | Efficiency-based rating from ESPN |
-| SRS | Simple Rating System (margin + SOS) |
-| Elo | Rating based on expected vs actual outcomes |
-| Vegas | Betting market lines |
+#### SP+ (ESPN)
+
+**Methodology:** Efficiency-based rating developed by Bill Connelly. Measures points per play adjusted for opponent, game situation, and garbage time. Splits into offensive and defensive components.
+
+**Strengths:**
+- Adjusts for pace (points per play, not per game)
+- Removes garbage time scoring
+- Considers play-by-play context
+
+**Weaknesses:**
+- Proprietary formula, not fully reproducible
+- Preseason priors can persist into late season
+
+#### SRS (Simple Rating System)
+
+**Methodology:** Average margin of victory adjusted for strength of schedule. Iterative calculation similar to this algorithm but using raw margin instead of game grades.
+
+```
+SRS = average_margin + average_opponent_SRS
+```
+
+**Strengths:**
+- Simple and transparent
+- No preseason priors
+- Easy to verify
+
+**Weaknesses:**
+- Treats 28-0 and 56-28 identically
+- No venue adjustment
+- Susceptible to garbage time
+
+#### Elo
+
+**Methodology:** Rating system where teams exchange points based on expected vs actual outcomes. Originally from chess, adapted for football. After each game:
+
+```
+new_rating = old_rating + K * (actual - expected)
+```
+
+Where K is typically 20-32 and expected is based on rating difference.
+
+**Strengths:**
+- Updates incrementally after each game
+- Self-correcting over time
+- Well-understood mathematical properties
+
+**Weaknesses:**
+- Requires preseason initialization
+- Doesn't account for margin (in basic form)
+- Slow to react to mid-season changes
+
+#### Vegas Lines
+
+**Methodology:** Point spreads set by sportsbooks and moved by betting action. Reflects the market's best estimate of the point differential.
+
+**Strengths:**
+- Incorporates injury/suspension information
+- Crowd-sourced wisdom with real money on the line
+- Best historical track record for game predictions
+
+**Weaknesses:**
+- Designed to balance betting action, not predict scores
+- Not available for all games
+- Can reflect public perception biases
+
+### Interpreting Validation Results
 
 When our rankings diverge significantly from all validators, it suggests either:
 1. Our algorithm found something others missed
-2. Our algorithm is overweighting some factor (usually weak-schedule G5 teams)
+2. Our algorithm is overweighting some factor
 
-The `validate` command helps identify these discrepancies.
+Common patterns for overrated teams in our system:
+- **G5 teams with weak schedules** - High margins against weak opponents inflate ratings
+- **Teams with quality losses early** - Convergence eventually corrects, but early-season losses to later-good teams may not be recognized
+- **Teams in weak conferences** - Conference adjustment disabled in `pure_results` profile
+
+Use `ncaa-rank validate 2024 --team <team>` for deep-dive analysis.
 
 ---
 
