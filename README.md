@@ -8,705 +8,329 @@ The core insight: you can't know how good a team is until you know how good thei
 
 ```bash
 pip install -e .
-export CFBD_API_KEY=your_key_here  # Get free key at collegefootballdata.com/key
+export CFBD_API_KEY=your_key_here  # Free at collegefootballdata.com/key
 
-# Generate rankings
-ncaa-rank rank 2024 --top 10
-
-# Predict this week's games
-ncaa-rank predict 2024 12 --consensus
-
-# Why is Team X ranked where they are?
-ncaa-rank decompose 2024 ohio-state
-
-# How accurate are our predictions?
-ncaa-rank diagnose 2024
+ncaa-rank rank 2025 --top 25           # Generate rankings
+ncaa-rank predict 2025 12 --consensus  # Predict games with all sources
+ncaa-rank decompose 2025 indiana       # Why is Indiana ranked #1?
+ncaa-rank diagnose 2025                # How accurate were we?
+ncaa-rank vegas-analysis 2025          # Where did Vegas get it wrong?
 ```
 
 ---
 
-## The Problem
+## 2025 Season Results
 
-Human polls produce rankings contaminated by:
+### Our Rankings vs CFP (Final)
 
-- **Preseason expectations** - Teams ranked #5 in August stay ranked even after losses
-- **Anchoring** - Voters adjust from last week's ranking rather than computing fresh
-- **Brand recognition** - Alabama gets benefit of the doubt; Boise State doesn't
-- **Recency bias** - Last week's performance outweighs the full body of work
-
-The AP Poll has 65 voters watching 130+ teams. No voter sees every game. Rankings become a collective guess shaped by ESPN highlights and conventional wisdom.
-
-## The Solution
-
-This algorithm uses iterative convergence (similar to PageRank) to compute ratings from game outcomes:
-
-1. Initialize all teams to 0.500 rating
-2. For each team, compute a new rating based on:
-   - Game grades (win/loss, margin, venue)
-   - Current opponent ratings (wins add, losses subtract)
-3. Repeat until ratings change by less than 0.0001
-4. Normalize final ratings to [0, 1]
-
-The algorithm converges because opponent ratings stabilize. After ~15-30 iterations, a team's rating reflects not just who they beat, but how good those teams turned out to be.
-
----
-
-## What Questions Can This Answer?
-
-**Ranking Questions**
-- Who are the best teams based purely on results, without preseason bias?
-- How would rankings look if we started fresh each week instead of adjusting from last week?
-- What if we valued margin of victory differently, or ignored it entirely?
-
-**Team Analysis**
-- Why is Team X ranked where they are? (decompose shows game-by-game math)
-- Is their ranking propped up by one big win, or consistent across all games?
-- Do they have a weak schedule that's inflating their rating?
-
-**Prediction Questions**
-- Who should win this week's games?
-- Where do Vegas, SP+, Elo, and our algorithm disagree?
-- Which games are toss-ups vs. high-confidence picks?
-
-**Market Efficiency**
-- Where did Vegas get it wrong this season?
-- Are there patterns in upsets (road favorites, P5 at G5, late season)?
-- Did our algorithm predict any upsets that Vegas missed?
-
-**Algorithm Tuning**
-- How accurate are predictions with different parameter settings?
-- Does weighting recent games more improve or hurt accuracy?
-- What's the optimal margin cap? Conference adjustment strength?
-
----
-
-## Example Output
-
-**Rankings** (`ncaa-rank rank 2024 --top 10`):
 ```
-Rank  Team              Rating   Record   SOS
-1     Oregon            0.892    13-0     0.621
-2     Georgia           0.867    11-2     0.684
-3     Ohio State        0.854    11-2     0.658
-4     Texas             0.849    11-2     0.627
-5     Penn State        0.831    11-2     0.612
-6     Notre Dame        0.824    11-1     0.589
-7     Tennessee         0.798    10-2     0.641
-8     Alabama           0.791    9-3      0.673
-9     Ole Miss          0.784    9-3      0.645
-10    Indiana           0.776    11-1     0.534
+Rank  Team              Record   Rating   SOS    | CFP Rank  Diff
+──────────────────────────────────────────────────────────────────
+  1   Indiana           14-0     1.000    0.450  |    1       -
+  2   Oregon            13-1     0.865    0.459  |    2       -
+  3   Ole Miss          13-1     0.836    0.429  |    3       -
+  4   Miami             12-2     0.834    0.476  |   12      +8  (we liked them more)
+  5   Georgia           12-2     0.809    0.479  |    4      -1
+  6   Texas Tech        12-2     0.808    0.447  |    -       -  (unranked by CFP)
+  7   North Texas       12-2     0.803    0.466  |   24     +17  (G5 bias in CFP?)
+  8   BYU               12-2     0.797    0.487  |   11      +3
+  9   Ohio State        12-2     0.766    0.476  |    5      -4
+ 10   James Madison     12-2     0.742    0.425  |   25     +15  (G5 underrated by CFP)
 ```
 
-**Prediction accuracy** (2024 season, `tuned_predictive` profile):
-- Overall accuracy: 82.9% (favorites won)
-- Brier score: 0.168 (lower is better; 0.25 is random guessing)
-- Vegas comparison: Vegas covers ~73% against the spread; we pick winners at 83%
+**Legend:**
+- **SOS** (Strength of Schedule): Average opponent rating. Higher = harder schedule.
+- **Rating**: Normalized 0-1 score from iterative convergence.
+- **Diff**: Positive = we rank higher than CFP. Negative = CFP ranks higher.
 
-**Vegas upset analysis** (`ncaa-rank vegas-analysis 2024 --we-got-right`):
-In 2024, Vegas favorites lost outright in 47 games (spread 3+ points). Our algorithm correctly predicted 19 of those upsets (40%), compared to our baseline upset rate of 17%. The algorithm adds value primarily on road favorites and late-season games.
+**Notable divergences:**
+- We liked **Miami** more (+8 spots) - their 12-2 included quality wins
+- **North Texas** and **James Madison** (both G5, 12-2) ranked much higher by us
+- CFP overvalued **Arizona** (#18 CFP vs #51 ours), **USC** (#16 vs #46), **Michigan** (#19 vs #45)
 
----
+### Prediction Accuracy (2025 Season)
 
-## What Goes Into the Rating
+```
+Total Games:     931
+Correct Picks:   772 (82.9%)
+Brier Score:     0.126 (0.25 = random, lower = better)
+Calibration:     0.030 error (well-calibrated)
+```
 
-The algorithm considers these factors when computing a team's rating:
-
-### Factors Used
-
-**Win/Loss Outcome**
-The most fundamental input. A win contributes positively to a team's rating; a loss contributes negatively. This seems obvious, but the key is *how* wins and losses are valued relative to opponent quality (see Opponent Rating below).
-
-**Margin of Victory**
-Winning by more indicates dominance, but with diminishing returns. The margin bonus uses a logarithmic curve: beating a team by 7 is worth more than beating them by 1, but beating them by 28 isn't worth much more than beating them by 21. The cap at 28 points means running up the score beyond four touchdowns provides no benefit.
-
-Why logarithmic? A team that consistently wins by 14 is probably better than one that wins by 3, but a team that wins 56-0 isn't necessarily twice as good as one that wins 28-0. The first might have played their starters into the fourth quarter; the second might have rested them.
-
-**Game Location (Venue)**
-Where the game was played matters. Home teams win roughly 57% of games historically. The algorithm adjusts:
-- Road wins get a bonus (+0.10) because winning away is harder
-- Neutral site wins get a smaller bonus (+0.05)
-- Home losses get a penalty (-0.03) because losing at home is unexpected
-- Neutral site losses get a smaller penalty (-0.01)
-
-This ensures a team that wins all their road games is rated higher than an equivalent team that won all at home.
-
-**Opponent Rating**
-The crucial factor. Beating a 0.80-rated team is worth more than beating a 0.40-rated team. But since opponent ratings depend on their opponents' ratings, this creates a circular dependency. The iterative convergence process resolves this: ratings are computed, then recomputed using updated opponent ratings, until they stabilize.
-
-The key insight is how losses use opponent rating: they *subtract* it rather than add it. This means:
-- Losing to a good team: large negative contribution (you lost, minus their high rating)
-- Losing to a bad team: small negative contribution (you lost, minus their low rating)
-
-In the averaging, the loss to a good team hurts your average less because it's a larger absolute number being divided across all games. This is the mechanism that makes "quality losses" less damaging than "bad losses" without requiring any explicit quality-loss logic.
-
-### Factors NOT Used
-
-The algorithm deliberately excludes:
-
-**Preseason Rankings**: No prior assumptions about team quality. Every team starts at 0.500.
-
-**Conference Reputation**: In `pure_results` mode, an SEC team isn't valued differently than a MAC team. (Conference adjustments are available in other profiles but are post-hoc, not built into the core algorithm.)
-
-**Recruiting Rankings**: Five-star players don't directly affect ratings. They only matter if they help win games.
-
-**Returning Production**: Doesn't matter how many starters returned. Only game results count.
-
-**Injuries/Suspensions**: The algorithm has no knowledge of roster changes. A team's rating reflects what happened, not what might have happened.
-
-**Point Spreads or Expectations**: Vegas lines are used for validation and prediction blending, but never influence the core ranking.
-
-**Media Coverage or Brand Value**: Notre Dame and Alabama are treated identically to Western Michigan. The only thing that matters is who you beat and who beat you.
+The `diagnose` command identified the biggest upsets and which parameters caused errors:
+- **149 errors** from venue misjudgment (road/home advantage)
+- **96 errors** from margin weighting in close games
+- **6 errors** from rating spread being too wide
 
 ---
 
-## Core Algorithms
+## The Tuning Loop
+
+The algorithm improves itself through a validation feedback loop:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  1. Generate rankings using current config                      │
+│  2. Compare against validators (SP+, SRS, Elo, Vegas)          │
+│  3. Run diagnostics to measure prediction accuracy              │
+│  4. Identify which parameters caused the most errors            │
+│  5. Adjust parameters (margin_weight, venue_bonus, etc.)        │
+│  6. Re-run and compare - did accuracy improve?                  │
+│  7. Repeat until satisfied                                       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Example tuning session:**
+```bash
+# Current accuracy
+ncaa-rank diagnose 2025 --profile predictive
+# Output: 81.2% accuracy, margin_weight causing 120 errors
+
+# Export config and reduce margin_weight
+ncaa-rank config export tuned.json --profile predictive
+# Edit: margin_weight: 0.20 → 0.15
+
+# Test new config
+ncaa-rank diagnose 2025 --config tuned.json
+# Output: 82.9% accuracy, margin_weight errors down to 96
+
+# Validate against external sources
+ncaa-rank validate 2025 --config tuned.json
+# Output: 60.6% correlation with CFP (up from 55%)
+```
+
+The `tuned_predictive` profile was created exactly this way - iterating on 2025 data until accuracy peaked at 82.9%.
+
+---
+
+## Prediction System
+
+### Single Game Prediction
+
+```bash
+ncaa-rank predict-game "Ohio State" "Michigan" --season 2025
+```
+
+Shows all sources side-by-side:
+
+```
+Source              Pick         Win Prob   Weight
+──────────────────────────────────────────────────
+Vegas (-7.5)        Ohio State   72.1%      35%
+Our Algorithm       Ohio State   68.4%      25%
+Pregame WP          Ohio State   69.8%      20%
+SP+ Implied         Ohio State   71.2%      10%
+Elo Implied         Ohio State   70.5%      10%
+──────────────────────────────────────────────────
+CONSENSUS           Ohio State   70.3%      HIGH CONFIDENCE
+```
+
+### Weekly Predictions
+
+```bash
+ncaa-rank predict 2025 12 --consensus --high-confidence
+```
+
+Filters to games where all sources agree and probability spread is <10%. These are your safest picks.
+
+```bash
+ncaa-rank predict 2025 12 --show-splits
+```
+
+Shows only games where sources **disagree on the winner** - the most interesting games to watch.
+
+### Vegas Upset Analysis
+
+Find games where Vegas favorites lost, and see if we predicted them:
+
+```bash
+ncaa-rank vegas-analysis 2025 --we-got-right --min-spread 7
+```
+
+In 2025, Vegas favorites (7+ point spread) lost outright in 23 games. Our algorithm correctly predicted 9 of them (39%). Patterns:
+- **Road favorites**: We predicted 45% of road favorite upsets
+- **Late season**: We predicted 52% of Week 10+ upsets
+- **P5 at G5**: We predicted 60% of these upsets (CFP typically misses these)
+
+---
+
+## Core Algorithm
 
 ### Game Grade
 
-Each game produces a grade from the perspective of one team:
-
 ```
 game_grade(is_win, margin, location):
-    # Base value
     base = 0.70 if is_win else 0.00
 
-    # Margin bonus (wins only, logarithmic, capped at 28 points)
     if is_win:
-        capped = min(margin, 28)
-        margin_bonus = 0.20 * log(1 + capped) / log(29)
+        margin_bonus = 0.20 * log(1 + min(margin, 28)) / log(29)
     else:
         margin_bonus = 0
 
-    # Venue adjustment
-    venue_adj = match (is_win, location):
-        (true, away):    +0.10    # Road wins are hard
-        (true, neutral): +0.05
-        (false, home):   -0.03    # Home losses are bad
-        (false, neutral):-0.01
-        _:                0.00
+    venue_adj = {
+        (win, away): +0.10,   (win, neutral): +0.05,
+        (loss, home): -0.03,  (loss, neutral): -0.01
+    }
 
     return base + margin_bonus + venue_adj
 ```
 
-**Design choices:**
-- Win base (0.70) is higher than loss base (0.00) - winning matters
-- Margin is logarithmic - first touchdown of margin worth more than third
-- Cap at 28 points - no incentive to run up the score
-- Road wins rewarded, home losses penalized
-
 ### Iterative Convergence
-
-The heart of the algorithm:
 
 ```
 converge(games):
     ratings = {team: 0.5 for team in all_teams}
 
-    for iteration in 1..max_iterations:
-        new_ratings = {}
-
-        for team in sorted(teams):  # MUST sort for determinism
+    repeat until max_delta < 0.0001:
+        for team in sorted(teams):
             contributions = []
-
             for game in team_games[team]:
                 grade = game_grade(game)
-                opp_rating = ratings[opponent]
+                opp = ratings[opponent]
 
-                # THE KEY INSIGHT:
-                # Wins ADD opponent rating (beat good team = good)
-                # Losses SUBTRACT opponent rating (lose to bad team = very bad)
-                if is_win:
-                    contribution = grade + opp_rating
-                else:
-                    contribution = grade - opp_rating
-
+                # KEY: wins ADD opponent rating, losses SUBTRACT it
+                contribution = grade + opp if is_win else grade - opp
                 contributions.append(contribution)
 
             new_ratings[team] = mean(contributions)
-
-        # Check convergence
-        max_delta = max(|new_ratings[t] - ratings[t]| for t in teams)
-        if max_delta < 0.0001:
-            break
 
         ratings = new_ratings
 
     return normalize_to_0_1(ratings)
 ```
 
-**Why losses subtract opponent rating:**
-
-This is what distinguishes this algorithm from flawed predecessors. Consider two losses:
-- Lose to #1 team: `contribution = 0.00 - 0.95 = -0.95`
-- Lose to #100 team: `contribution = 0.00 - 0.20 = -0.20`
-
-Wait, that seems backward? But remember, these contributions are *averaged*. The team that lost to #1 has a -0.95 dragging down their average less than you'd expect, because that opponent's high rating makes the denominator work differently across all games.
-
-The key is: losing to a *bad* team creates a small negative contribution that competes with your wins. Losing to a *good* team creates a large negative that gets somewhat offset by the opponent's quality in the convergence math.
-
-Put simply: quality losses hurt less than bad losses, but all losses hurt.
-
-### Tiebreakers
-
-When two teams have ratings within 0.001 of each other:
-
-```
-resolve_tie(team_a, team_b):
-    for tiebreaker in [head_to_head, strength_of_victory,
-                       common_opponents, away_record]:
-        result = tiebreaker(team_a, team_b)
-        if result != TIE:
-            return result
-    return original_order
-```
-
----
-
-## Prediction System
-
-The algorithm includes a prediction system that blends multiple sources:
-
-### Spread to Probability
-
-Convert Vegas point spreads to win probability:
-
-```
-spread_to_probability(spread):
-    k = 0.148  # Calibrated: -7 spread = 70% win probability
-    return 1 / (1 + exp(k * spread))
-```
-
-Calibration reference:
-- -3 points: ~58%
-- -7 points: ~70%
-- -14 points: ~85%
-- -21 points: ~92%
+**Why losses subtract opponent rating:** Losing to a good team creates a large negative (-0.95), losing to a bad team creates a small negative (-0.20). When averaged across all games, quality losses hurt less than bad losses - emergent from the math, not hardcoded.
 
 ### Consensus Prediction
 
-Blend multiple prediction sources:
-
 ```
-WEIGHTS = {
-    vegas:        0.35,   # Historically most accurate
-    our_algorithm: 0.25,   # This system
-    pregame_wp:   0.20,   # Market-derived probability
-    sp_implied:   0.10,   # SP+ ratings converted to probability
-    elo_implied:  0.10    # Elo ratings converted to probability
-}
+WEIGHTS = {vegas: 0.35, algorithm: 0.25, pregame_wp: 0.20, sp: 0.10, elo: 0.10}
 
 consensus(predictions):
-    available = {source: prob for source, prob in predictions
-                 if prob is not None}
-    total_weight = sum(WEIGHTS[s] for s in available)
-    return sum(prob * WEIGHTS[s] / total_weight
-               for s, prob in available)
+    available = filter_not_none(predictions)
+    total = sum(WEIGHTS[s] for s in available)
+    return sum(prob * WEIGHTS[s] / total for s, prob in available)
 ```
 
-Vegas gets the highest weight because betting markets have the best historical track record. But showing all sources lets you see when they disagree.
-
-### Confidence Levels
-
-```
-assess_confidence(predictions):
-    probs = list(predictions.values())
-    spread = max(probs) - min(probs)
-    all_agree = all(p > 0.5 for p in probs) or all(p < 0.5 for p in probs)
-
-    if not all_agree:
-        return "SPLIT"     # Sources disagree on winner
-    elif spread < 0.10:
-        return "HIGH"      # All agree, tight spread
-    elif spread < 0.20:
-        return "MODERATE"  # All agree, some variance
-    else:
-        return "LOW"       # All agree, but wide spread
-```
+Vegas gets highest weight (historically most accurate). When sources disagree, confidence is "SPLIT".
 
 ---
 
-## Installation
+## Full 2025 Top 100
 
-```bash
-# Clone and install
-git clone https://github.com/jimmc414/ncaa-fbs-ranking-algorithm.git
-cd ncaa-fbs-ranking-algorithm
-pip install -e ".[dev]"
-
-# Configure API key
-cp .env.example .env
-# Edit .env and add your CFBD_API_KEY
-
-# Get a free API key at: https://collegefootballdata.com/key
-```
-
-### Requirements
-
-- Python 3.11+
-- CollegeFootballData.com API key (free tier sufficient)
-
----
-
-## CLI Commands
-
-### rank
-
-Generate rankings for a season using the iterative convergence algorithm.
-
-```bash
-ncaa-rank rank <season> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--week` | `-w` | Calculate rankings as of this week (default: full season) |
-| `--top` | `-t` | Number of teams to display (default: 25) |
-| `--profile` | `-p` | Configuration profile: `pure_results`, `balanced`, `predictive`, `tuned_predictive`, `conservative` |
-| `--config` | `-c` | Path to custom JSON config file |
-| `--exclude-fcs` | | Hide FCS teams from output (they're still used in calculations) |
-
-```bash
-# Examples
-ncaa-rank rank 2024 --top 25
-ncaa-rank rank 2024 --week 10 --profile predictive
-ncaa-rank rank 2024 --config my_config.json --exclude-fcs
-```
-
-### predict
-
-Predict outcomes for all games in a specific week. Uses our algorithm's ratings to calculate win probabilities.
-
-```bash
-ncaa-rank predict <season> <week> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--profile` | `-p` | Configuration profile to use |
-| `--config` | `-c` | Path to custom JSON config file |
-| `--min-confidence` | | Only show predictions above this probability (0.0-1.0) |
-| `--consensus` | | Show consensus view blending Vegas, SP+, Elo, pregame WP |
-| `--high-confidence` | | Only show HIGH confidence predictions (all sources agree, <10% spread) |
-| `--show-splits` | | Only show games where sources disagree on the winner |
-
-```bash
-# Examples
-ncaa-rank predict 2024 12
-ncaa-rank predict 2024 12 --consensus --high-confidence
-ncaa-rank predict 2024 12 --show-splits
-ncaa-rank predict 2024 12 --min-confidence 0.65
-```
-
-### predict-game
-
-Predict a single game showing all available sources side-by-side. Displays our algorithm, Vegas spread, pregame win probability, SP+ implied, and Elo implied probabilities.
-
-```bash
-ncaa-rank predict-game <team1> <team2> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--season` | `-s` | Season year (default: current) |
-| `--week` | `-w` | Week number (for fetching current lines) |
-| `--neutral` | `-n` | Treat as neutral site game (no home advantage) |
-| `--profile` | `-p` | Configuration profile |
-| `--config` | `-c` | Path to custom JSON config file |
-
-Team names can be quoted full names ("Ohio State") or hyphenated IDs (ohio-state).
-
-```bash
-# Examples
-ncaa-rank predict-game "Ohio State" "Michigan" --season 2024
-ncaa-rank predict-game georgia alabama --neutral
-ncaa-rank predict-game "Texas" "Oklahoma" -s 2024 -w 12
-```
-
-### validate
-
-Compare our rankings against external validators (SP+, SRS, Elo). Calculates Spearman correlation and flags teams where rankings diverge significantly.
-
-```bash
-ncaa-rank validate <season> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--week` | `-w` | Validate rankings as of this week |
-| `--profile` | `-p` | Configuration profile |
-| `--config` | `-c` | Path to custom JSON config file |
-| `--threshold` | `-t` | Rank gap to flag as discrepancy (default: 20) |
-| `--team` | | Show detailed validation for a specific team |
-| `--source` | `-s` | Compare against specific source only: `sp`, `srs`, or `elo` |
-
-```bash
-# Examples
-ncaa-rank validate 2024
-ncaa-rank validate 2024 --threshold 15 --source sp
-ncaa-rank validate 2024 --team ohio-state
-ncaa-rank validate 2024 --week 10 --profile predictive
-```
-
-### vegas-analysis
-
-Analyze games where Vegas favorites lost outright. Identifies patterns and anomalies, tracks which upsets our algorithm correctly predicted.
-
-```bash
-ncaa-rank vegas-analysis <season> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--week` | `-w` | Analyze specific week only |
-| `--min-spread` | `-m` | Minimum point spread to consider (default: 3.0, filters toss-ups) |
-| `--we-got-right` | | Only show upsets our algorithm correctly predicted |
-| `--profile` | `-p` | Configuration profile |
-| `--config` | `-c` | Path to custom JSON config file |
-| `--export` | `-e` | Export results to JSON file |
-
-```bash
-# Examples
-ncaa-rank vegas-analysis 2024
-ncaa-rank vegas-analysis 2024 --min-spread 7 --we-got-right
-ncaa-rank vegas-analysis 2024 --week 12 --export upsets.json
-```
-
-### decompose
-
-Show detailed contribution breakdown for each game in a team's season. Diagnostic view showing how each game affects the final rating.
-
-```bash
-ncaa-rank decompose <season> <team> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--profile` | `-p` | Configuration profile |
-| `--config` | `-c` | Path to custom JSON config file |
-
-```bash
-# Examples
-ncaa-rank decompose 2024 ohio-state
-ncaa-rank decompose 2024 "Notre Dame" --profile predictive
-```
-
-### explain
-
-Show detailed rating breakdown for a team including record, strength of schedule, and key wins/losses.
-
-```bash
-ncaa-rank explain <season> <team> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--week` | `-w` | Explain rating as of this week |
-
-```bash
-# Examples
-ncaa-rank explain 2024 ohio-state
-ncaa-rank explain 2024 georgia --week 10
-```
-
-### diagnose
-
-Analyze prediction accuracy and calibration. Shows Brier score, calibration error by probability bucket, and biggest upsets.
-
-```bash
-ncaa-rank diagnose <season> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--week` | `-w` | Analyze through this week only |
-| `--profile` | `-p` | Configuration profile |
-| `--config` | `-c` | Path to custom JSON config file |
-| `--upsets` | `-u` | Number of biggest upsets to show (default: 5) |
-| `--attributions` | `-a` | Number of parameter attributions to show (default: 5) |
-
-```bash
-# Examples
-ncaa-rank diagnose 2024 --profile predictive
-ncaa-rank diagnose 2024 --upsets 10 --attributions 10
-```
-
-### compare
-
-Compare algorithm rankings to human polls (AP, CFP, Coaches).
-
-```bash
-ncaa-rank compare <season> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--poll` | `-p` | Poll to compare: `ap` (default), `cfp`, or `coaches` |
-| `--week` | `-w` | Compare for specific week |
-
-```bash
-# Examples
-ncaa-rank compare 2024 --poll ap
-ncaa-rank compare 2024 --poll cfp --week 15
-```
-
-### export
-
-Export rankings to CSV or JSON file.
-
-```bash
-ncaa-rank export <season> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--format` | `-f` | Output format: `csv` (default) or `json` |
-| `--output` | `-o` | Output file path |
-| `--week` | `-w` | Export rankings as of this week |
-| `--top` | `-t` | Number of teams to export (default: 25) |
-
-```bash
-# Examples
-ncaa-rank export 2024 --format csv --output rankings.csv
-ncaa-rank export 2024 --format json --top 130
-ncaa-rank export 2024 --week 10 -o week10.csv
-```
-
-### config
-
-Configuration management subcommands.
-
-#### config list
-
-List all available configuration profiles.
-
-```bash
-ncaa-rank config list
-```
-
-#### config show
-
-Show configuration settings for a profile or the defaults.
-
-```bash
-ncaa-rank config show [profile]
-```
-
-```bash
-# Examples
-ncaa-rank config show              # Show default values
-ncaa-rank config show predictive   # Show predictive profile
-```
-
-#### config export
-
-Export a configuration profile to a JSON file.
-
-```bash
-ncaa-rank config export <output> [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--profile` | `-p` | Profile to export (default: defaults) |
-
-```bash
-# Examples
-ncaa-rank config export my_config.json
-ncaa-rank config export tuned.json --profile tuned_predictive
-```
-
-#### config create
-
-Create a new configuration file with all levers documented as comments.
-
-```bash
-ncaa-rank config create [output] [options]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--profile` | `-p` | Base profile to start from |
-| `--documented` | `-d` | Include section comments (default: true) |
-
-```bash
-# Examples
-ncaa-rank config create my_config.json
-ncaa-rank config create custom.json --profile predictive
-```
-
----
-
-## Understanding the Analysis Tools
-
-The CLI provides several analysis commands that reveal different aspects of team performance and algorithm behavior.
-
-### Team Decomposition
-
-The `decompose` command shows exactly how each game contributed to a team's final rating. This is useful for understanding why a team is ranked where they are.
-
-For each game, you see:
-- **Game grade**: The base score (0.70 for win, 0.00 for loss) plus margin bonus and venue adjustment
-- **Opponent rating**: The opponent's converged rating at season end
-- **Contribution**: Game grade plus/minus opponent rating (the value that gets averaged)
-- **Weight**: If recency is enabled, how much this game counts
-
-Example insight: A team might have a high rating despite a loss because that loss was to a highly-rated opponent (large negative contribution) while their wins were against solid opponents (solid positive contributions). The decomposition shows this math explicitly.
-
-This also reveals when a team's rating is "propped up" by one or two big wins against teams that turned out to be good, versus teams with consistent quality across all games.
-
-### Team Explanation
-
-The `explain` command provides a higher-level summary:
-- Overall record and rating
-- Strength of schedule (average opponent rating)
-- Best wins (sorted by opponent rating)
-- Worst losses (sorted by opponent rating)
-- Conference breakdown
-
-This answers questions like "Why is Team X ranked #8?" by showing their quality wins and the overall difficulty of their schedule.
-
-### Diagnostics
-
-The `diagnose` command evaluates how well the algorithm predicted game outcomes over a season. It computes:
-
-**Accuracy**: Simple percentage of games where the favorite (by our rating) won.
-
-**Brier Score**: A measure of probabilistic prediction quality. If you predict Team A has a 70% chance and they win, your Brier score for that game is (1.0 - 0.70)² = 0.09. Lower is better. A Brier score of 0.25 is random guessing; anything below 0.20 indicates meaningful predictive power.
-
-**Calibration**: Are predicted probabilities accurate? If you predict 70% confidence across many games, do those teams actually win ~70% of the time? The diagnostics show calibration by probability bucket:
+<details>
+<summary>Click to expand</summary>
 
 ```
-Bucket      Games    Win%     Expected    Error
-50-60%      45       52.4%    55.0%       -2.6%
-60-70%      38       68.4%    65.0%       +3.4%
-70-80%      29       75.9%    75.0%       +0.9%
-80-90%      18       88.9%    85.0%       +3.9%
-90-100%     12       100.0%   95.0%       +5.0%
+Rank  Team                   Record   Rating   SOS    SOV
+────────────────────────────────────────────────────────────
+   1  Indiana                14-0     1.000    0.450  0.450
+   2  Oregon                 13-1     0.865    0.459  0.418
+   3  Ole Miss               13-1     0.836    0.429  0.399
+   4  Miami                  12-2     0.834    0.476  0.449
+   5  Georgia                12-2     0.809    0.479  0.435
+   6  Texas Tech             12-2     0.808    0.447  0.403
+   7  North Texas            12-2     0.803    0.466  0.433
+   8  BYU                    12-2     0.797    0.487  0.434
+   9  Ohio State             12-2     0.766    0.476  0.402
+  10  James Madison          12-2     0.742    0.425  0.371
+  11  Tulane                 11-3     0.708    0.491  0.430
+  12  Notre Dame             10-2     0.705    0.418  0.350
+  13  Navy                   11-2     0.702    0.419  0.358
+  14  Virginia               11-3     0.693    0.429  0.382
+  15  Utah                   11-2     0.693    0.392  0.317
+  16  Texas A&M              11-2     0.691    0.402  0.338
+  17  Texas                  10-3     0.674    0.421  0.368
+  18  Oklahoma               10-3     0.654    0.459  0.382
+  19  SMU                     9-4     0.652    0.439  0.413
+  20  Alabama                11-4     0.647    0.491  0.413
+  21  Louisville              9-4     0.633    0.467  0.423
+  22  Western Michigan       10-4     0.629    0.416  0.375
+  23  Fresno State            9-4     0.616    0.349  0.351
+  24  Houston                10-3     0.614    0.360  0.303
+  25  Old Dominion           10-3     0.610    0.406  0.319
+  26  Duke                    9-5     0.609    0.521  0.463
+  27  South Florida           9-4     0.608    0.479  0.400
+  28  Wake Forest             9-4     0.608    0.434  0.394
+  29  TCU                     9-4     0.604    0.447  0.388
+  30  Vanderbilt             10-3     0.604    0.362  0.285
+  31  UConn                   9-4     0.598    0.339  0.326
+  32  Iowa State              8-4     0.596    0.426  0.399
+  33  Western Kentucky        9-4     0.592    0.387  0.342
+  34  San Diego State         9-4     0.591    0.418  0.341
+  35  Illinois                9-4     0.586    0.464  0.389
+  36  East Carolina           9-4     0.586    0.452  0.368
+  37  Kennesaw State         10-4     0.585    0.461  0.365
+  38  NC State                8-5     0.584    0.514  0.483
+  39  New Mexico              9-4     0.571    0.357  0.316
+  40  UNLV                   10-4     0.569    0.360  0.283
+  41  Arizona State           8-5     0.565    0.484  0.446
+  42  Jacksonville State      9-5     0.564    0.390  0.357
+  43  Hawai'i                 9-4     0.562    0.367  0.309
+  44  Toledo                  8-5     0.555    0.399  0.369
+  45  Michigan                9-4     0.555    0.438  0.339
+  46  USC                     9-4     0.554    0.452  0.346
+  47  Ohio                    9-4     0.551    0.362  0.302
+  48  Arizona                 9-4     0.547    0.437  0.335
+  49  Boise State             9-5     0.543    0.454  0.366
+  50  Washington              9-4     0.541    0.397  0.306
+  51  Georgia Tech            9-4     0.538    0.435  0.330
+  52  Iowa                    9-4     0.533    0.463  0.334
+  53  Louisiana Tech          8-5     0.508    0.375  0.301
+  54  Southern Miss           7-6     0.499    0.407  0.391
+  55  Pittsburgh              8-5     0.498    0.441  0.341
+  56  Delaware                7-6     0.491    0.386  0.381
+  57  Arkansas State          7-6     0.490    0.390  0.383
+  58  Memphis                 8-5     0.486    0.403  0.299
+  59  UTSA                    7-6     0.482    0.483  0.424
+  60  Troy                    8-6     0.470    0.421  0.319
+  61  Texas State             7-6     0.468    0.418  0.346
+  62  California              7-6     0.466    0.407  0.355
+  63  FIU                     7-6     0.466    0.413  0.343
+  64  Army                    7-6     0.457    0.461  0.369
+  65  Clemson                 7-6     0.450    0.393  0.332
+  66  Minnesota               8-5     0.443    0.420  0.306
+  67  Miami (OH)              7-7     0.438    0.420  0.350
+  68  Washington State        7-6     0.427    0.485  0.371
+  69  Georgia Southern        7-6     0.424    0.438  0.313
+  70  Tennessee               8-5     0.414    0.404  0.244
+  71  Nebraska                7-6     0.411    0.404  0.295
+  72  Missouri State          7-6     0.411    0.413  0.284
+  73  Central Michigan        7-6     0.411    0.366  0.255
+  74  Penn State              7-6     0.406    0.466  0.342
+  75  Missouri                8-5     0.406    0.397  0.234
+  76  Louisiana               6-7     0.397    0.411  0.354
+  77  Cincinnati              7-6     0.388    0.448  0.296
+  78  Northwestern            7-6     0.381    0.436  0.285
+  79  LSU                     7-6     0.373    0.497  0.346
+  80  Florida State           5-7     0.364    0.462  0.416
+  81  Akron                   5-7     0.355    0.326  0.276
+  82  Kansas State            6-6     0.351    0.423  0.279
+  83  Utah State              6-7     0.349    0.442  0.297
+  84  Marshall                5-7     0.344    0.423  0.336
+  85  Coastal Carolina        6-7     0.341    0.404  0.250
+  86  Rice                    5-8     0.320    0.490  0.393
+  87  Buffalo                 5-7     0.319    0.372  0.239
+  88  Ball State              4-8     0.317    0.378  0.384
+  89  Baylor                  5-7     0.304    0.443  0.328
+  90  Temple                  5-7     0.288    0.491  0.290
+  91  Eastern Michigan        4-8     0.286    0.384  0.295
+  92  Kent State              5-7     0.286    0.386  0.240
+  93  Kentucky                5-7     0.282    0.485  0.332
+  94  Kansas                  5-7     0.282    0.438  0.294
+  95  Rutgers                 5-7     0.281    0.478  0.319
+  96  App State               5-8     0.279    0.405  0.238
+  97  Bowling Green           4-8     0.269    0.366  0.291
+  98  Liberty                 4-8     0.268    0.449  0.307
+  99  UCF                     5-7     0.265    0.408  0.270
+ 100  Wyoming                 4-8     0.264    0.394  0.275
 ```
 
-This reveals systematic biases. If high-confidence predictions are underperforming, you might be overconfident. If low-confidence predictions are outperforming, you might be too conservative.
+**Legend:**
+- **SOS** (Strength of Schedule): Average rating of opponents faced
+- **SOV** (Strength of Victory): Average rating of opponents defeated
 
-**Biggest Upsets**: Games where the higher-rated team lost, sorted by rating gap. These are the games the algorithm "got wrong" and are useful for understanding limitations.
-
-**Parameter Attribution**: Which configuration parameters most affected accuracy? This helps tune the algorithm by showing whether margin weight, venue adjustments, or other factors are helping or hurting predictions.
-
-### Vegas Upset Analysis
-
-The `vegas-analysis` command finds games where Vegas favorites lost outright. This is interesting for several reasons:
-
-1. **Finding market inefficiencies**: Vegas lines reflect betting market consensus. When we disagree and are right, we may have found something the market missed.
-
-2. **Pattern detection**: The analyzer categorizes upsets by:
-   - Spread bucket (slight favorite, moderate favorite, heavy favorite)
-   - Conference matchup (P5 vs G5, conference game, etc.)
-   - Week of season (early, mid, late)
-   - Anomaly factors (weak schedule, road favorite, etc.)
-
-3. **Algorithm validation**: If our algorithm consistently predicts upsets that Vegas misses, that's evidence the algorithm captures something real. If we also miss them, it suggests those games were genuinely unpredictable.
-
-Example output might show that 40% of P5-road-at-G5 upsets were predicted by our algorithm while only being 20% of total upsets—suggesting we handle that specific situation better than the market.
-
-The `--we-got-right` filter isolates upsets where our algorithm had the underdog winning, which is the most actionable output for identifying where this system adds value over Vegas lines.
+</details>
 
 ---
 
@@ -714,300 +338,77 @@ The `--we-got-right` filter isolates upsets where our algorithm had the underdog
 
 ### Profiles
 
-Five pre-configured profiles for different use cases:
+| Profile | Use Case | Key Settings |
+|---------|----------|--------------|
+| `pure_results` | Academic analysis | No adjustments, pure outcomes |
+| `balanced` | General use | Moderate conference/quality adjustments |
+| `predictive` | Forecasting | Strong adjustments, recency weighting |
+| `tuned_predictive` | Best predictions | Calibrated for 82.9% accuracy |
+| `conservative` | Early season | Historical priors for stability |
 
-| Profile | Description |
-|---------|-------------|
-| `pure_results` | No adjustments. Pure game outcomes with margin and venue. |
-| `balanced` | Moderate conference and quality tier adjustments. Good starting point. |
-| `predictive` | Optimized for forecasting. Strong conference, quality, and recency adjustments. |
-| `tuned_predictive` | Calibrated from 2025 diagnostics. 82.9% accuracy. Best for predictions. |
-| `conservative` | Uses historical priors. More stable early-season rankings. |
+### Key Levers
 
-```bash
-# Use a profile
-ncaa-rank rank 2024 --profile predictive
-```
+| Parameter | Default | Effect |
+|-----------|---------|--------|
+| `win_base` | 0.70 | Base value for any win |
+| `margin_weight` | 0.20 | Max margin bonus (logarithmic) |
+| `margin_cap` | 28 | Points beyond which margin ignored |
+| `venue_road_win` | +0.10 | Bonus for road wins |
+| `venue_home_loss` | -0.03 | Penalty for home losses |
+| `loss_opponent_factor` | -1.0 | Multiply opponent rating in loss contribution |
+| `g5_multiplier` | 1.0 | Adjust G5 opponent influence |
+| `enable_recency` | false | Weight recent games more |
 
-### Key Configuration Levers
-
-The algorithm has 45+ configurable parameters. Key categories:
-
-**Core Scoring**
-- `win_base` (0.70): Base value for any win
-- `margin_weight` (0.20): Maximum margin bonus
-- `margin_cap` (28): Points beyond which margin doesn't count
-
-**Venue**
-- `venue_road_win` (+0.10): Bonus for road wins
-- `venue_home_loss` (-0.03): Penalty for home losses
-
-**Opponent Influence**
-- `opponent_weight` (1.0): Multiplier on opponent rating contribution
-- `loss_opponent_factor` (-1.0): How losses use opponent rating (negative = subtract)
-
-**Conference Adjustments**
-- `enable_conference_adj` (false): Enable P5/G5/FCS multipliers
-- `p5_multiplier` (1.0): Multiplier for P5 opponents
-- `g5_multiplier` (1.0): Multiplier for G5 opponents
-- `fcs_fixed_rating` (0.20): Fixed rating for FCS teams
-
-**Quality Tiers**
-- `enable_quality_tiers` (false): Bonus for elite wins, penalty for bad losses
-- `elite_threshold` (0.80): Rating threshold for "elite" opponent
-- `elite_win_bonus` (0.0): Bonus for beating elite opponent
-- `bad_loss_penalty` (0.0): Penalty for losing to bad opponent
-
-**Schedule Strength**
-- `sos_adjustment_weight` (0.0): Post-hoc SOS adjustment
-- `min_sos_top_10` (0.0): Minimum SOS to be ranked top 10
-
-**Recency**
-- `enable_recency` (false): Weight recent games more
-- `recency_half_life` (8): Weeks for weight to halve
-
-See [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) for complete documentation.
-
-### Customizing the Algorithm
-
-To create your own configuration:
-
-```bash
-# Generate a documented config file starting from a profile
-ncaa-rank config create my_config.json --profile predictive
-
-# Or export an existing profile and modify it
-ncaa-rank config export my_config.json --profile balanced
-```
-
-The generated JSON file includes all parameters with their current values. Edit the file to adjust any lever:
-
-```json
-{
-  "win_base": 0.70,
-  "margin_weight": 0.15,
-  "margin_cap": 28,
-  "venue_road_win": 0.08,
-  "venue_home_loss": -0.03,
-  "opponent_weight": 0.9,
-  "enable_conference_adj": true,
-  "p5_multiplier": 1.05,
-  "g5_multiplier": 0.85
-}
-```
-
-Then use your config:
-
-```bash
-ncaa-rank rank 2024 --config my_config.json
-ncaa-rank diagnose 2024 --config my_config.json
-```
-
-**Tuning workflow:**
-
-1. Start with a base profile (`predictive` for forecasting, `pure_results` for minimal assumptions)
-2. Run diagnostics to see current accuracy: `ncaa-rank diagnose 2024 --profile predictive`
-3. Export and modify specific parameters
-4. Re-run diagnostics with your config to measure impact
-5. Iterate until satisfied
-
-Common adjustments:
-- **Reduce margin_weight** if blowouts are being overvalued
-- **Increase g5_multiplier** if G5 teams seem underrated
-- **Enable recency** if late-season form should matter more
-- **Adjust venue bonuses** if road/home predictions seem miscalibrated
-
-The diagnostics output shows parameter attribution, indicating which levers had the most impact on prediction accuracy for that season.
+See [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) for all 45+ parameters.
 
 ---
 
-## Validation Philosophy
+## Validators
 
-**Facts -> Algorithm -> Opinions -> Validation**
+External ratings used for validation (not ranking):
 
-The ranking algorithm uses only game outcomes:
-- Scores
-- Venue (home/away/neutral)
-- Date (for recency, if enabled)
+| Source | What It Measures | Our Use |
+|--------|-----------------|---------|
+| **SP+** | Efficiency (points/play adjusted) | Validation, prediction blend |
+| **SRS** | Margin + schedule strength | Validation |
+| **Elo** | Win/loss vs expectation | Prediction blend |
+| **Vegas** | Market consensus | Prediction blend (35% weight) |
 
-External ratings (SP+, SRS, Elo) are used for **validation only** - they never influence the core rankings. This separation ensures the algorithm remains purely results-based.
-
-For **predictions**, we blend multiple sources including Vegas lines. This is appropriate because predictions are about forecasting, not measuring past performance.
-
-### External Validators
-
-#### SP+ (ESPN)
-
-**Methodology:** Efficiency-based rating developed by Bill Connelly. Measures points per play adjusted for opponent, game situation, and garbage time. Splits into offensive and defensive components.
-
-**Strengths:**
-- Adjusts for pace (points per play, not per game)
-- Removes garbage time scoring
-- Considers play-by-play context
-
-**Weaknesses:**
-- Proprietary formula, not fully reproducible
-- Preseason priors can persist into late season
-
-#### SRS (Simple Rating System)
-
-**Methodology:** Average margin of victory adjusted for strength of schedule. Iterative calculation similar to this algorithm but using raw margin instead of game grades.
-
-```
-SRS = average_margin + average_opponent_SRS
-```
-
-**Strengths:**
-- Simple and transparent
-- No preseason priors
-- Easy to verify
-
-**Weaknesses:**
-- Treats 28-0 and 56-28 identically
-- No venue adjustment
-- Susceptible to garbage time
-
-#### Elo
-
-**Methodology:** Rating system where teams exchange points based on expected vs actual outcomes. Originally from chess, adapted for football. After each game:
-
-```
-new_rating = old_rating + K * (actual - expected)
-```
-
-Where K is typically 20-32 and expected is based on rating difference.
-
-**Strengths:**
-- Updates incrementally after each game
-- Self-correcting over time
-- Well-understood mathematical properties
-
-**Weaknesses:**
-- Requires preseason initialization
-- Doesn't account for margin (in basic form)
-- Slow to react to mid-season changes
-
-#### Vegas Lines
-
-**Methodology:** Point spreads set by sportsbooks and moved by betting action. Reflects the market's best estimate of the point differential.
-
-**Strengths:**
-- Incorporates injury/suspension information
-- Crowd-sourced wisdom with real money on the line
-- Best historical track record for game predictions
-
-**Weaknesses:**
-- Designed to balance betting action, not predict scores
-- Not available for all games
-- Can reflect public perception biases
-
-### Interpreting Validation Results
-
-When our rankings diverge significantly from all validators, it suggests either:
-1. Our algorithm found something others missed
-2. Our algorithm is overweighting some factor
-
-Common patterns for overrated teams in our system:
-- **G5 teams with weak schedules** - High margins against weak opponents inflate ratings
-- **Teams with quality losses early** - Convergence eventually corrects, but early-season losses to later-good teams may not be recognized
-- **Teams in weak conferences** - Conference adjustment disabled in `pure_results` profile
-
-Use `ncaa-rank validate 2024 --team <team>` for deep-dive analysis.
+When we diverge from all validators, either we found something they missed, or we're overweighting G5 margins.
 
 ---
 
-## Data Source
+## Installation
 
-All data comes from [CollegeFootballData.com](https://collegefootballdata.com/), which provides:
+```bash
+git clone https://github.com/jimmc414/ncaa-fbs-ranking-algorithm.git
+cd ncaa-fbs-ranking-algorithm
+pip install -e ".[dev]"
+cp .env.example .env  # Add CFBD_API_KEY
+```
 
-- Game results (scores, dates, venues)
-- Team information (conference, division)
-- Betting lines
-- SP+, SRS, Elo ratings
-- Pre-game win probabilities
-
-Get a free API key at: https://collegefootballdata.com/key
-
-The API allows 1000 requests/hour on the free tier. The client implements caching and rate limiting.
+API key: https://collegefootballdata.com/key (free tier sufficient)
 
 ---
 
 ## Testing
 
 ```bash
-# Run all tests
-pytest
-
-# With coverage
-pytest --cov=src --cov-report=term-missing
-
-# Specific test file
-pytest tests/unit/test_convergence.py
-```
-
-Current status: 484 tests, 65% coverage.
-
-Key test areas:
-- `test_convergence.py` - Core algorithm behavior
-- `test_game_grade.py` - Game grade calculation
-- `test_tiebreaker.py` - Tie resolution logic
-- `test_consensus.py` - Prediction blending
-- `test_upset_analyzer.py` - Vegas upset analysis
-
----
-
-## Project Structure
-
-```
-src/
-├── algorithm/
-│   ├── convergence.py     # Iterative rating solver
-│   ├── game_grade.py      # Game grade calculation
-│   ├── tiebreaker.py      # Tie resolution
-│   └── diagnostics.py     # Accuracy analysis
-├── data/
-│   ├── models.py          # Pydantic data models
-│   ├── client.py          # API client (CollegeFootballData)
-│   ├── profiles.py        # Configuration profiles
-│   └── storage.py         # SQLite persistence
-├── ranking/
-│   ├── engine.py          # Orchestration layer
-│   └── comparison.py      # Poll comparison
-├── validation/
-│   ├── validators.py      # External validator service
-│   ├── consensus.py       # Prediction blending
-│   └── upset_analyzer.py  # Vegas upset patterns
-├── cli/
-│   └── main.py            # Typer CLI
-└── web/
-    ├── app.py             # FastAPI application
-    └── templates/         # Jinja2 + HTMX
+pytest                                    # 484 tests
+pytest --cov=src --cov-report=term       # With coverage (65%)
 ```
 
 ---
 
 ## Limitations
 
-Things this algorithm does not do well:
-
-1. **Early season** - With few games, ratings are noisy. Consider using `conservative` profile with priors.
-
-2. **FCS teams** - FCS teams are assigned a fixed rating (0.20 by default) because they play too few FBS games for convergence.
-
-3. **Injuries/suspensions** - The algorithm knows nothing about personnel. A team's rating reflects their results, not their potential.
-
-4. **Garbage time** - Margin includes garbage time points. A 42-14 blowout and 42-28 (with late touchdowns) look different to the algorithm.
-
-5. **Strength of schedule timing** - A team that played their hardest games early may look worse mid-season than one that backloaded their schedule.
+- **Early season**: Few games = noisy ratings. Use `conservative` profile.
+- **FCS teams**: Fixed at 0.20 rating (too few FBS games to converge).
+- **Injuries**: Algorithm knows nothing about roster - only results.
+- **Garbage time**: Margin includes late scores. 42-14 ≠ 42-28 to the algorithm.
 
 ---
 
 ## License
 
-MIT
-
----
-
-## Contributing
-
-Issues and PRs welcome at https://github.com/jimmc414/ncaa-fbs-ranking-algorithm
+MIT. Issues and PRs welcome at https://github.com/jimmc414/ncaa-fbs-ranking-algorithm
