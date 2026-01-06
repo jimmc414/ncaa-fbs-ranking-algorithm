@@ -30,6 +30,58 @@ The algorithm converges because opponent ratings stabilize. After ~15-30 iterati
 
 ---
 
+## What Goes Into the Rating
+
+The algorithm considers these factors when computing a team's rating:
+
+### Factors Used
+
+**Win/Loss Outcome**
+The most fundamental input. A win contributes positively to a team's rating; a loss contributes negatively. This seems obvious, but the key is *how* wins and losses are valued relative to opponent quality (see Opponent Rating below).
+
+**Margin of Victory**
+Winning by more indicates dominance, but with diminishing returns. The margin bonus uses a logarithmic curve: beating a team by 7 is worth more than beating them by 1, but beating them by 28 isn't worth much more than beating them by 21. The cap at 28 points means running up the score beyond four touchdowns provides no benefit.
+
+Why logarithmic? A team that consistently wins by 14 is probably better than one that wins by 3, but a team that wins 56-0 isn't necessarily twice as good as one that wins 28-0. The first might have played their starters into the fourth quarter; the second might have rested them.
+
+**Game Location (Venue)**
+Where the game was played matters. Home teams win roughly 57% of games historically. The algorithm adjusts:
+- Road wins get a bonus (+0.10) because winning away is harder
+- Neutral site wins get a smaller bonus (+0.05)
+- Home losses get a penalty (-0.03) because losing at home is unexpected
+- Neutral site losses get a smaller penalty (-0.01)
+
+This ensures a team that wins all their road games is rated higher than an equivalent team that won all at home.
+
+**Opponent Rating**
+The crucial factor. Beating a 0.80-rated team is worth more than beating a 0.40-rated team. But since opponent ratings depend on their opponents' ratings, this creates a circular dependency. The iterative convergence process resolves this: ratings are computed, then recomputed using updated opponent ratings, until they stabilize.
+
+The key insight is how losses use opponent rating: they *subtract* it rather than add it. This means:
+- Losing to a good team: large negative contribution (you lost, minus their high rating)
+- Losing to a bad team: small negative contribution (you lost, minus their low rating)
+
+In the averaging, the loss to a good team hurts your average less because it's a larger absolute number being divided across all games. This is the mechanism that makes "quality losses" less damaging than "bad losses" without requiring any explicit quality-loss logic.
+
+### Factors NOT Used
+
+The algorithm deliberately excludes:
+
+**Preseason Rankings**: No prior assumptions about team quality. Every team starts at 0.500.
+
+**Conference Reputation**: In `pure_results` mode, an SEC team isn't valued differently than a MAC team. (Conference adjustments are available in other profiles but are post-hoc, not built into the core algorithm.)
+
+**Recruiting Rankings**: Five-star players don't directly affect ratings. They only matter if they help win games.
+
+**Returning Production**: Doesn't matter how many starters returned. Only game results count.
+
+**Injuries/Suspensions**: The algorithm has no knowledge of roster changes. A team's rating reflects what happened, not what might have happened.
+
+**Point Spreads or Expectations**: Vegas lines are used for validation and prediction blending, but never influence the core ranking.
+
+**Media Coverage or Brand Value**: Notre Dame and Alabama are treated identically to Western Michigan. The only thing that matters is who you beat and who beat you.
+
+---
+
 ## Core Algorithms
 
 ### Game Grade
@@ -507,6 +559,80 @@ ncaa-rank config create custom.json --profile predictive
 
 ---
 
+## Understanding the Analysis Tools
+
+The CLI provides several analysis commands that reveal different aspects of team performance and algorithm behavior.
+
+### Team Decomposition
+
+The `decompose` command shows exactly how each game contributed to a team's final rating. This is useful for understanding why a team is ranked where they are.
+
+For each game, you see:
+- **Game grade**: The base score (0.70 for win, 0.00 for loss) plus margin bonus and venue adjustment
+- **Opponent rating**: The opponent's converged rating at season end
+- **Contribution**: Game grade plus/minus opponent rating (the value that gets averaged)
+- **Weight**: If recency is enabled, how much this game counts
+
+Example insight: A team might have a high rating despite a loss because that loss was to a highly-rated opponent (large negative contribution) while their wins were against solid opponents (solid positive contributions). The decomposition shows this math explicitly.
+
+This also reveals when a team's rating is "propped up" by one or two big wins against teams that turned out to be good, versus teams with consistent quality across all games.
+
+### Team Explanation
+
+The `explain` command provides a higher-level summary:
+- Overall record and rating
+- Strength of schedule (average opponent rating)
+- Best wins (sorted by opponent rating)
+- Worst losses (sorted by opponent rating)
+- Conference breakdown
+
+This answers questions like "Why is Team X ranked #8?" by showing their quality wins and the overall difficulty of their schedule.
+
+### Diagnostics
+
+The `diagnose` command evaluates how well the algorithm predicted game outcomes over a season. It computes:
+
+**Accuracy**: Simple percentage of games where the favorite (by our rating) won.
+
+**Brier Score**: A measure of probabilistic prediction quality. If you predict Team A has a 70% chance and they win, your Brier score for that game is (1.0 - 0.70)² = 0.09. Lower is better. A Brier score of 0.25 is random guessing; anything below 0.20 indicates meaningful predictive power.
+
+**Calibration**: Are predicted probabilities accurate? If you predict 70% confidence across many games, do those teams actually win ~70% of the time? The diagnostics show calibration by probability bucket:
+
+```
+Bucket      Games    Win%     Expected    Error
+50-60%      45       52.4%    55.0%       -2.6%
+60-70%      38       68.4%    65.0%       +3.4%
+70-80%      29       75.9%    75.0%       +0.9%
+80-90%      18       88.9%    85.0%       +3.9%
+90-100%     12       100.0%   95.0%       +5.0%
+```
+
+This reveals systematic biases. If high-confidence predictions are underperforming, you might be overconfident. If low-confidence predictions are outperforming, you might be too conservative.
+
+**Biggest Upsets**: Games where the higher-rated team lost, sorted by rating gap. These are the games the algorithm "got wrong" and are useful for understanding limitations.
+
+**Parameter Attribution**: Which configuration parameters most affected accuracy? This helps tune the algorithm by showing whether margin weight, venue adjustments, or other factors are helping or hurting predictions.
+
+### Vegas Upset Analysis
+
+The `vegas-analysis` command finds games where Vegas favorites lost outright. This is interesting for several reasons:
+
+1. **Finding market inefficiencies**: Vegas lines reflect betting market consensus. When we disagree and are right, we may have found something the market missed.
+
+2. **Pattern detection**: The analyzer categorizes upsets by:
+   - Spread bucket (slight favorite, moderate favorite, heavy favorite)
+   - Conference matchup (P5 vs G5, conference game, etc.)
+   - Week of season (early, mid, late)
+   - Anomaly factors (weak schedule, road favorite, etc.)
+
+3. **Algorithm validation**: If our algorithm consistently predicts upsets that Vegas misses, that's evidence the algorithm captures something real. If we also miss them, it suggests those games were genuinely unpredictable.
+
+Example output might show that 40% of P5-road-at-G5 upsets were predicted by our algorithm while only being 20% of total upsets—suggesting we handle that specific situation better than the market.
+
+The `--we-got-right` filter isolates upsets where our algorithm had the underdog winning, which is the most actionable output for identifying where this system adds value over Vegas lines.
+
+---
+
 ## Configuration
 
 ### Profiles
@@ -564,6 +690,57 @@ The algorithm has 45+ configurable parameters. Key categories:
 - `recency_half_life` (8): Weeks for weight to halve
 
 See [CONFIG_REFERENCE.md](CONFIG_REFERENCE.md) for complete documentation.
+
+### Customizing the Algorithm
+
+To create your own configuration:
+
+```bash
+# Generate a documented config file starting from a profile
+ncaa-rank config create my_config.json --profile predictive
+
+# Or export an existing profile and modify it
+ncaa-rank config export my_config.json --profile balanced
+```
+
+The generated JSON file includes all parameters with their current values. Edit the file to adjust any lever:
+
+```json
+{
+  "win_base": 0.70,
+  "margin_weight": 0.15,
+  "margin_cap": 28,
+  "venue_road_win": 0.08,
+  "venue_home_loss": -0.03,
+  "opponent_weight": 0.9,
+  "enable_conference_adj": true,
+  "p5_multiplier": 1.05,
+  "g5_multiplier": 0.85
+}
+```
+
+Then use your config:
+
+```bash
+ncaa-rank rank 2024 --config my_config.json
+ncaa-rank diagnose 2024 --config my_config.json
+```
+
+**Tuning workflow:**
+
+1. Start with a base profile (`predictive` for forecasting, `pure_results` for minimal assumptions)
+2. Run diagnostics to see current accuracy: `ncaa-rank diagnose 2024 --profile predictive`
+3. Export and modify specific parameters
+4. Re-run diagnostics with your config to measure impact
+5. Iterate until satisfied
+
+Common adjustments:
+- **Reduce margin_weight** if blowouts are being overvalued
+- **Increase g5_multiplier** if G5 teams seem underrated
+- **Enable recency** if late-season form should matter more
+- **Adjust venue bonuses** if road/home predictions seem miscalibrated
+
+The diagnostics output shows parameter attribution, indicating which levers had the most impact on prediction accuracy for that season.
 
 ---
 
