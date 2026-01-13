@@ -22,18 +22,18 @@ class TestAlgorithmConfigOpponentInfluence:
         assert config.opponent_weight == 1.2
 
     def test_loss_opponent_factor_default(self):
-        """Default loss opponent factor is -1.0."""
+        """Default loss opponent factor is 1.0 (penalty scale for quality losses)."""
         from src.data.models import AlgorithmConfig
 
         config = AlgorithmConfig()
-        assert config.loss_opponent_factor == -1.0
+        assert config.loss_opponent_factor == 1.0
 
     def test_loss_opponent_factor_custom(self):
         """Custom loss opponent factor accepted."""
         from src.data.models import AlgorithmConfig
 
-        config = AlgorithmConfig(loss_opponent_factor=-0.8)
-        assert config.loss_opponent_factor == -0.8
+        config = AlgorithmConfig(loss_opponent_factor=0.8)
+        assert config.loss_opponent_factor == 0.8
 
     def test_second_order_weight_default(self):
         """Default second order weight is 0.0."""

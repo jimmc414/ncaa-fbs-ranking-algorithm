@@ -6,9 +6,14 @@ convergence (similar to PageRank) to derive team ratings from game outcomes.
 Key insight: You can't know how good a team is until you know how good their
 opponents are, which depends on _their_ opponents, recursively.
 
-CRITICAL: Losses SUBTRACT opponent rating, not add. This ensures:
-- Losing to a good team hurts less than losing to a bad team
-- But losing always hurts (no "quality loss" bonus)
+CRITICAL: Quality losses hurt less than bad losses. The formula:
+- Win:  contribution = game_grade + opponent_rating
+- Loss: contribution = game_grade - (1 - opponent_rating) * loss_opponent_factor
+
+With default loss_opponent_factor=1.0:
+- Loss to 0.9 team: -(1-0.9) = -0.1 (small penalty)
+- Loss to 0.1 team: -(1-0.1) = -0.9 (big penalty)
+- Losses always hurt, but quality losses hurt less
 """
 
 from dataclasses import dataclass
@@ -117,17 +122,16 @@ def iterate_once(
     CRITICAL: Process teams in sorted order for determinism.
 
     The rating formula for each team is:
-        R_t = (1/N) * sum(GameGrade_i + W_i * R_opp_i - L_i * R_opp_i)
+        Win:  contribution = GameGrade + R_opp
+        Loss: contribution = GameGrade - (1 - R_opp) * loss_opponent_factor
 
-    Where:
-        - N is number of games
-        - W_i is 1 if win, 0 otherwise
-        - L_i is 1 if loss, 0 otherwise
-        - R_opp_i is opponent's current rating
+    With default loss_opponent_factor=1.0:
+        Loss to 0.9 team: -(1-0.9) = -0.1 (quality loss = small penalty)
+        Loss to 0.1 team: -(1-0.1) = -0.9 (bad loss = big penalty)
 
     Configurable modifiers:
         - opponent_weight: Multiplier on opponent rating
-        - loss_opponent_factor: Factor for loss contribution (default -1.0)
+        - loss_opponent_factor: Scale for loss penalty (default 1.0)
         - quality_tiers: Bonuses for elite wins, penalties for bad losses
         - conference_multipliers: P5/G5/FCS adjustments to opponent rating
 
@@ -170,12 +174,15 @@ def iterate_once(
             # Apply opponent weight
             weighted_opp_rating = opp_rating * config.opponent_weight
 
-            # CRITICAL: Losses SUBTRACT opponent rating (with configurable factor)
+            # CRITICAL: Quality losses hurt less than bad losses
             if result.is_win:
                 contribution = game_grade + weighted_opp_rating
             else:
-                # loss_opponent_factor is typically -1.0, subtracting opp rating
-                contribution = game_grade + (config.loss_opponent_factor * weighted_opp_rating)
+                # Penalty proportional to opponent weakness (clamped for convergence stability)
+                # Loss to 0.9 team: penalty = 0.1, Loss to 0.1 team: penalty = 0.9
+                opponent_weakness = 1.0 - weighted_opp_rating
+                clamped_weakness = max(0.0, min(1.0, opponent_weakness))
+                contribution = game_grade - clamped_weakness * config.loss_opponent_factor
 
             # Apply quality tier bonuses/penalties if enabled
             if config.enable_quality_tiers and normalized_ratings:

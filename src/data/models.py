@@ -147,7 +147,7 @@ class AlgorithmConfig(BaseModel):
 
     # ========== OPPONENT INFLUENCE (3) ==========
     opponent_weight: float = 1.0  # Multiplier on opponent rating
-    loss_opponent_factor: float = -1.0  # How losses use opponent rating
+    loss_opponent_factor: float = 1.0  # Scale for loss penalty (penalty = (1-opp_rating) * factor)
     second_order_weight: float = 0.0  # Weight of opponent's SOS
 
     # ========== CONFERENCE (5) ==========

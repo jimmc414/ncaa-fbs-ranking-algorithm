@@ -260,12 +260,16 @@ def decompose_game_contribution(
     # Game grade (base + margin + venue)
     game_grade = base_result + margin_bonus + venue_adjustment
 
-    # Opponent contribution
+    # Opponent contribution (quality losses hurt less than bad losses)
     weighted_opp_rating = opponent_rating * config.opponent_weight
     if game_result.is_win:
         opponent_contribution = weighted_opp_rating
     else:
-        opponent_contribution = config.loss_opponent_factor * weighted_opp_rating
+        # Penalty proportional to opponent weakness (clamped for stability)
+        # Loss to 0.9 team: -0.1, Loss to 0.1 team: -0.9
+        opponent_weakness = 1.0 - weighted_opp_rating
+        clamped_weakness = max(0.0, min(1.0, opponent_weakness))
+        opponent_contribution = -clamped_weakness * config.loss_opponent_factor
 
     # Quality tier adjustment
     quality_tier_adjustment = 0.0

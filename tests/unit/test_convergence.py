@@ -340,51 +340,42 @@ class TestEdgeCases:
         assert blowout_grade - close_grade > 0.15
 
     def test_home_vs_road_win(self, algorithm_config):
-        """Road win valued more than home win (connected graph)."""
-        from src.data.models import Game
-        from src.algorithm.convergence import converge
+        """Road win game grade is higher than home win game grade."""
+        from src.data.models import Game, GameResult
+        from src.algorithm.game_grade import compute_game_grade_for_result
 
-        # Create connected graph where we can compare home vs road wins
-        # A wins at home vs C, B wins on road vs D
-        # C and D play each other to connect the graph
-        games = [
-            Game(
-                game_id=1,
-                season=2024,
-                week=1,
-                game_date=date(2024, 8, 31),
-                home_team_id="A",
-                away_team_id="C",  # A is home
-                home_score=28,
-                away_score=14,
-            ),
-            Game(
-                game_id=2,
-                season=2024,
-                week=1,
-                game_date=date(2024, 8, 31),
-                home_team_id="D",
-                away_team_id="B",  # B is away
-                home_score=14,
-                away_score=28,
-            ),
-            # Connect the graph: C beats D (equal opponents)
-            Game(
-                game_id=3,
-                season=2024,
-                week=2,
-                game_date=date(2024, 9, 7),
-                home_team_id="C",
-                away_team_id="D",
-                home_score=17,
-                away_score=14,
-            ),
-        ]
+        # Same margin, different venues
+        home_win = GameResult(
+            game_id=1,
+            team_id="A",
+            opponent_id="X",
+            team_score=28,
+            opponent_score=14,
+            location="home",
+            is_win=True,
+            margin=14,
+        )
 
-        result = converge(games, algorithm_config)
+        road_win = GameResult(
+            game_id=2,
+            team_id="B",
+            opponent_id="Y",
+            team_score=28,
+            opponent_score=14,
+            location="away",
+            is_win=True,
+            margin=14,
+        )
 
-        # B should be rated higher than A due to road win bonus
-        assert result.ratings["B"] > result.ratings["A"]
+        home_grade = compute_game_grade_for_result(home_win, algorithm_config)
+        road_grade = compute_game_grade_for_result(road_win, algorithm_config)
+
+        # Road win should have higher game grade due to venue bonus
+        assert road_grade > home_grade, (
+            f"Road win grade ({road_grade:.4f}) should be > home win grade ({home_grade:.4f})"
+        )
+        # Difference should be approximately venue_road_win (0.10)
+        assert abs(road_grade - home_grade - algorithm_config.venue_road_win) < 0.001
 
     def test_max_iterations_reached(self, algorithm_config):
         """Algorithm stops at max iterations if needed."""
@@ -413,10 +404,10 @@ class TestEdgeCases:
 
 
 class TestLossPenalty:
-    """CRITICAL: Tests that verify losses subtract opponent rating."""
+    """CRITICAL: Tests that verify quality losses hurt less than bad losses."""
 
     def test_loss_contribution_formula(self, algorithm_config):
-        """Verify loss contribution uses game_grade - opponent_rating."""
+        """Verify loss contribution formula: base_penalty + factor * opp_rating."""
         from src.data.models import Game
         from src.algorithm.convergence import (
             initialize_ratings,
@@ -443,9 +434,10 @@ class TestLossPenalty:
         new_ratings = iterate_once(ratings, game_results, algorithm_config)
 
         # B lost, so B's rating should be:
-        # game_grade(loss, away) - A_rating = 0 - 0.5 = -0.5
-        assert new_ratings["B"] < 0  # Negative rating due to subtraction
-        assert new_ratings["B"] == -0.5  # Exactly -0.5 (game_grade 0 minus initial 0.5)
+        # game_grade(loss, away) - (1 - A_rating) * loss_opponent_factor
+        # = 0 - (1 - 0.5) * 1.0 = -0.5
+        assert new_ratings["B"] < 0  # Negative rating
+        assert new_ratings["B"] == -0.5  # Penalty = (1 - 0.5) = 0.5
 
     def test_losses_always_hurt(self, algorithm_config):
         """Verify that losses always reduce rating (no 'quality loss' bonus)."""
@@ -496,6 +488,76 @@ class TestLossPenalty:
         # A should be higher than B (A beat B, only lost to C)
         assert result.ratings["C"] > result.ratings["A"]
         assert result.ratings["A"] > result.ratings["B"]
+
+    def test_quality_losses_hurt_less(self, algorithm_config):
+        """Verify that losing to a good team hurts LESS than losing to a bad team.
+
+        This is the key test for the corrected loss formula:
+        - Team A loses to elite team (T1)
+        - Team B loses to bad team (T6)
+        - Both beat the same mediocre teams
+        - A should be rated HIGHER than B
+        """
+        from src.data.models import Game
+        from src.algorithm.convergence import converge
+
+        # Setup: T1 is elite, T6 is bad, T3/T4/T5 are mediocre
+        # T1 beats everyone (goes 5-0)
+        # T6 loses to everyone (goes 0-5)
+        # A and B both beat T3, T4, T5 but lose to different opponents
+        games = [
+            # T1 (elite) beats T2, T3, T4, T5, T6
+            Game(game_id=1, season=2024, week=1, game_date=date(2024, 8, 31),
+                 home_team_id="T1", away_team_id="T2", home_score=35, away_score=14),
+            Game(game_id=2, season=2024, week=2, game_date=date(2024, 9, 7),
+                 home_team_id="T1", away_team_id="T3", home_score=42, away_score=10),
+            Game(game_id=3, season=2024, week=3, game_date=date(2024, 9, 14),
+                 home_team_id="T1", away_team_id="T4", home_score=38, away_score=7),
+            Game(game_id=4, season=2024, week=4, game_date=date(2024, 9, 21),
+                 home_team_id="T1", away_team_id="T5", home_score=31, away_score=17),
+            Game(game_id=5, season=2024, week=5, game_date=date(2024, 9, 28),
+                 home_team_id="T1", away_team_id="T6", home_score=49, away_score=0),
+            # T6 (bad) loses to T2, T3, T4, T5 (already lost to T1 above)
+            Game(game_id=6, season=2024, week=1, game_date=date(2024, 8, 31),
+                 home_team_id="T2", away_team_id="T6", home_score=28, away_score=7),
+            Game(game_id=7, season=2024, week=2, game_date=date(2024, 9, 7),
+                 home_team_id="T3", away_team_id="T6", home_score=24, away_score=10),
+            Game(game_id=8, season=2024, week=3, game_date=date(2024, 9, 14),
+                 home_team_id="T4", away_team_id="T6", home_score=21, away_score=14),
+            Game(game_id=9, season=2024, week=4, game_date=date(2024, 9, 21),
+                 home_team_id="T5", away_team_id="T6", home_score=17, away_score=10),
+            # Team A beats T3, T4, T5 but loses to T1 (elite)
+            Game(game_id=10, season=2024, week=6, game_date=date(2024, 10, 5),
+                 home_team_id="A", away_team_id="T3", home_score=28, away_score=14),
+            Game(game_id=11, season=2024, week=7, game_date=date(2024, 10, 12),
+                 home_team_id="A", away_team_id="T4", home_score=31, away_score=17),
+            Game(game_id=12, season=2024, week=8, game_date=date(2024, 10, 19),
+                 home_team_id="A", away_team_id="T5", home_score=24, away_score=21),
+            Game(game_id=13, season=2024, week=9, game_date=date(2024, 10, 26),
+                 home_team_id="T1", away_team_id="A", home_score=35, away_score=21),  # A loses to elite T1
+            # Team B beats T3, T4, T5 but loses to T6 (bad)
+            Game(game_id=14, season=2024, week=6, game_date=date(2024, 10, 5),
+                 home_team_id="B", away_team_id="T3", home_score=28, away_score=14),
+            Game(game_id=15, season=2024, week=7, game_date=date(2024, 10, 12),
+                 home_team_id="B", away_team_id="T4", home_score=31, away_score=17),
+            Game(game_id=16, season=2024, week=8, game_date=date(2024, 10, 19),
+                 home_team_id="B", away_team_id="T5", home_score=24, away_score=21),
+            Game(game_id=17, season=2024, week=9, game_date=date(2024, 10, 26),
+                 home_team_id="T6", away_team_id="B", home_score=14, away_score=10),  # B loses to bad T6
+        ]
+
+        result = converge(games, algorithm_config)
+
+        # Key assertion: A (lost to elite T1) should be rated HIGHER than B (lost to bad T6)
+        # Both beat the same mediocre teams, but A's loss was to a much better opponent
+        assert result.ratings["A"] > result.ratings["B"], (
+            f"Quality loss should hurt less: A={result.ratings['A']:.4f} should be > "
+            f"B={result.ratings['B']:.4f} (A lost to elite, B lost to bad)"
+        )
+
+        # Also verify T1 is highest and T6 is lowest
+        assert result.ratings["T1"] > result.ratings["A"]
+        assert result.ratings["T6"] < result.ratings["B"]
 
 
 class TestOpponentWeight:

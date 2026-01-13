@@ -22,19 +22,26 @@ This is a NCAA football ranking algorithm that eliminates human voting bias. The
 
 ### Critical Implementation Details
 
-#### 1. The Loss Penalty (DO NOT GET THIS WRONG)
+#### 1. Quality Losses Hurt Less (CRITICAL)
 
-The key insight that distinguishes this algorithm: **losses subtract opponent rating**.
+The key insight: **losing to a good team should hurt less than losing to a bad team**.
 
 ```python
-# CORRECT
-contribution = game_grade + (1 if is_win else -1) * opponent_rating
+# CORRECT - Quality losses hurt less
+if is_win:
+    contribution = game_grade + opponent_rating
+else:
+    # Penalty = (1 - opponent_rating) × loss_opponent_factor
+    # Loss to 0.9 team: -(1-0.9) = -0.1 (small penalty)
+    # Loss to 0.1 team: -(1-0.1) = -0.9 (big penalty)
+    opponent_weakness = 1.0 - opponent_rating
+    contribution = game_grade - opponent_weakness * loss_opponent_factor
 
 # WRONG (this is the RMI flaw)
 contribution = game_grade + opponent_rating  # Losses shouldn't add opponent rating!
 ```
 
-This ensures losing to a good team hurts less than losing to a bad team, but still hurts.
+Losses always hurt, but losing to elite teams is penalized much less than losing to bad teams.
 
 #### 2. Margin Bonus is Logarithmic
 

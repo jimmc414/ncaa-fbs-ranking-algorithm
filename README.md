@@ -188,8 +188,12 @@ converge(games):
                 grade = game_grade(game)
                 opp = ratings[opponent]
 
-                # KEY: wins ADD opponent rating, losses SUBTRACT it
-                contribution = grade + opp if is_win else grade - opp
+                # KEY: quality losses hurt less than bad losses
+                if is_win:
+                    contribution = grade + opp
+                else:
+                    # Penalty = (1 - opp_rating): smaller for better opponents
+                    contribution = grade - (1 - opp)
                 contributions.append(contribution)
 
             new_ratings[team] = mean(contributions)
@@ -199,7 +203,7 @@ converge(games):
     return normalize_to_0_1(ratings)
 ```
 
-**Why losses subtract opponent rating:** Losing to a good team creates a large negative (-0.95), losing to a bad team creates a small negative (-0.20). When averaged across all games, quality losses hurt less than bad losses - emergent from the math, not hardcoded.
+**Why losses use `(1 - opponent_rating)`:** Losing to a 0.9-rated team costs only 0.1, losing to a 0.1-rated team costs 0.9. Quality losses hurt less, bad losses hurt more - the inverse of opponent strength.
 
 ### Consensus Prediction
 

@@ -82,12 +82,14 @@ How opponent quality affects your rating.
 | Lever | Default | Range | Description |
 |-------|---------|-------|-------------|
 | `opponent_weight` | 1.0 | 0.5-2.0 | Multiplier on opponent rating in contribution |
-| `loss_opponent_factor` | -1.0 | -1.5--0.5 | How losses use opponent rating (negative = subtract) |
+| `loss_opponent_factor` | 1.0 | 0.5-2.0 | Scale for loss penalty (penalty = (1-opp_rating) × factor) |
 | `second_order_weight` | 0.0 | 0.0-0.5 | Weight opponent's SOS in calculation |
 
 **Effect:**
 - Higher `opponent_weight` = SOS matters more
-- `loss_opponent_factor` of -1.0 means losses subtract opponent rating (key algorithm feature)
+- `loss_opponent_factor` scales the "quality losses hurt less" penalty:
+  - Loss to 0.9-rated team: penalty = (1-0.9) × 1.0 = **0.1** (small)
+  - Loss to 0.1-rated team: penalty = (1-0.1) × 1.0 = **0.9** (big)
 - `second_order_weight` adds opponents-of-opponents consideration
 
 ---
