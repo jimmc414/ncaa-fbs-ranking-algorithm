@@ -20,6 +20,12 @@ A bias-free ranking system for NCAA FBS football using iterative convergence, mu
 10. [API Integration](#10-api-integration)
 11. [Performance Metrics](#11-performance-metrics)
 12. [Limitations & Future Work](#12-limitations--future-work)
+13. [Preconditions & Error Handling](#13-preconditions--error-handling)
+
+**Appendices:**
+- [A: Algorithm Pseudocode](#appendix-a-algorithm-pseudocode)
+- [B: Consensus Pseudocode](#appendix-b-consensus-pseudocode)
+- [C: Web Dashboard](#appendix-c-web-dashboard)
 
 ---
 
@@ -184,6 +190,19 @@ The core algorithm can be augmented with:
 | SOS adjustment | Post-hoc adjustment for schedule strength | `sos_adjustment_weight` |
 | Second-order SOS | Factor in opponent's opponents | `second_order_weight` |
 
+### 2.7 Edge Cases
+
+| Scenario | Behavior |
+|----------|----------|
+| Tie game (same score) | Both teams: `is_win=False`, `margin=0`, contribution = game_grade only |
+| All teams identical rating | Normalized to 0.5 |
+| Team with 0 games | Returns `initial_rating` (default 0.5) |
+| Unknown conference | Defaults to G5 multiplier |
+| Unknown `margin_curve` value | Defaults to "log" |
+| Invalid tiebreaker string | Silently skipped |
+| Week 0 games | Included in week-based filtering |
+| FCS vs FCS games | Filtered out (only FBS-involved games kept) |
+
 ---
 
 ## 3. Prediction System
@@ -259,6 +278,10 @@ Predictions are categorized by source agreement:
 | SPLIT | Sources disagree on winner | Toss-up or contrarian picks |
 | UNKNOWN | Insufficient data | Cannot predict |
 
+### 3.4 Implementation Notes
+
+**Consensus weights are hardcoded** in `src/validation/consensus.py` and not configurable via `AlgorithmConfig`. To change weights, modify the source directly.
+
 ---
 
 ## 4. Validation System
@@ -332,6 +355,22 @@ Analyzes games where Vegas favorites lost outright:
 - Upsets we predicted correctly
 - Our edge: % of upsets we called
 
+### 4.6 Anomaly Factor Details
+
+The upset analyzer automatically detects these patterns:
+
+| Factor | Description | Detection Criteria |
+|--------|-------------|-------------------|
+| `weak_favorite_sos` | Favorite had weak schedule | SOS < 0.45 |
+| `small_rating_gap` | Teams were close in our ratings | Rating gap < 0.05 |
+| `we_predicted_upset` | Algorithm picked underdog | Our pick != Vegas pick |
+| `p5_road_at_g5` | P5 team at G5 venue | Conference mismatch + road game |
+| `late_season` | Late-season game | Week >= 10 |
+| `large_spread_upset` | Big favorite lost | Spread >= 10 points |
+| `road_favorite` | Favorite traveling | Vegas favorite was away team |
+
+Each factor tracks occurrences and our prediction accuracy when present.
+
 ---
 
 ## 5. Configuration
@@ -381,6 +420,21 @@ ncaa-rank rank 2025 --config my_config.json
 # Export profile for customization
 ncaa-rank config export my_config.json --profile predictive
 ```
+
+### 5.4 Parameter Validation
+
+**Warning:** Many parameters accept invalid values without validation:
+
+| Parameter | Risk |
+|-----------|------|
+| `win_base`, `margin_weight` | Can be negative |
+| `initial_rating` | Can be outside [0, 1] |
+| `opponent_weight`, `loss_opponent_factor` | Negative values invert logic |
+| `tie_threshold`, `min_games_to_rank` | Can be negative |
+| `elite_threshold`, `good_threshold`, `bad_threshold` | Order not enforced |
+| `p5_multiplier`, `g5_multiplier`, `fcs_multiplier` | Can be negative or zero |
+
+Pydantic validates types but not semantic ranges. Invalid values may cause unexpected behavior without errors.
 
 ---
 
@@ -841,6 +895,18 @@ class CFBDataClient:
         self._request_times.append(now)
 ```
 
+### 10.5 Cache TTL by Endpoint
+
+| Endpoint | TTL | Rationale |
+|----------|-----|-----------|
+| `/teams` | 24 hours | Team data rarely changes mid-season |
+| `/games` | 1 hour | Scores update during games |
+| `/ratings/sp`, `/ratings/srs`, `/ratings/elo` | 24 hours | Updated weekly |
+| `/lines` | 1 hour | Betting lines move |
+| `/metrics/wp/pregame` | 1 hour | Can update as game approaches |
+
+**Rate limit window:** Sliding 3600-second window from first request, not calendar hours.
+
 ---
 
 ## 11. Performance Metrics
@@ -908,6 +974,12 @@ When Vegas is wrong (upsets), we correctly predicted 32.1% of those outcomes.
 - Shortened season with conference-only games
 - Data is included but results may be anomalous
 
+**Incomplete Features (in code but not fully working):**
+- `conference_multiplier` in game decomposition: Always returns 1.0
+- `recency_weight` in game decomposition: Always returns 1.0
+- SOS thresholds (`min_sos_top_10`, `min_sos_top_25`): Evaluated but don't filter teams
+- `favorite_recent_record`, `underdog_recent_record` in upset analysis: Declared but never populated
+
 ### 12.2 Known Gaps vs Original Spec
 
 The original PROJECT_SPEC v0.1 described features that were never implemented:
@@ -930,6 +1002,48 @@ The original PROJECT_SPEC v0.1 described features that were never implemented:
 - Live game updates via webhooks
 - Mobile-friendly web dashboard
 - Bowl game prediction markets integration
+
+---
+
+## 13. Preconditions & Error Handling
+
+### 13.1 Environment Requirements
+
+| Requirement | Error if Missing |
+|-------------|------------------|
+| `CFBD_API_KEY` env var | `ValueError` with setup URL |
+| Valid API key | API returns 401/403 |
+| Network connectivity | `httpx.RequestError` after retries |
+| System clock accuracy | Cache expiry may malfunction |
+
+### 13.2 Error Handling Behavior
+
+| Error Type | Behavior |
+|------------|----------|
+| API 4xx (client error) | Immediate failure, no retry |
+| API 5xx (server error) | Exponential backoff, 3 retries, base delay 1s |
+| Network timeout | Same retry logic as 5xx |
+| Invalid JSON response | Uncaught `JSONDecodeError` propagates |
+| Missing game scores | Game silently filtered from dataset |
+| Empty game list | Empty rankings returned (no error) |
+
+### 13.3 Operation Preconditions
+
+| Operation | Precondition | Failure Mode |
+|-----------|--------------|--------------|
+| `rank_season()` | At least 1 game in list | Returns empty list |
+| `explain_rating()` | Team must have played 1+ games | `ValueError` |
+| `rank_as_of_week()` | Week number must exist in data | Empty or partial results |
+| `converge()` | Games list non-empty | Returns empty `ConvergenceResult` |
+| Normalization | Not all ratings identical | All become 0.5 if identical |
+
+### 13.4 Determinism Requirements
+
+For identical results across runs:
+- Teams **must** be processed in sorted order during iteration
+- Same input games always produce same output (no randomness)
+- Cache must be consistent (or disabled) for reproducibility
+- FCS fixed rating must be consistent across runs
 
 ---
 
@@ -1044,6 +1158,43 @@ def predict_game(
         ...
     )
 ```
+
+---
+
+## Appendix C: Web Dashboard
+
+FastAPI dashboard with HTMX for dynamic updates.
+
+### Endpoints
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/` | GET | Redirect to `/rankings/{current_year}` |
+| `/rankings/{season}` | GET | Rankings page with week selector (1-15) |
+| `/rankings/{season}/table` | GET | HTMX partial for ranking table |
+| `/teams/{team_id}/{season}` | GET | Team detail with game-by-game breakdown |
+| `/compare/{season}` | GET | Poll comparison page (AP/CFP) |
+| `/compare/{season}/table` | GET | HTMX partial for comparison table |
+| `/config` | GET | Configuration profile selector |
+| `/config/profile/{name}` | GET | HTMX partial with profile config form |
+| `/api/config/{name}` | GET | JSON config export |
+
+### Running the Dashboard
+
+```bash
+# Start development server
+uvicorn src.web.app:app --reload
+
+# Visit http://localhost:8000
+```
+
+### Features
+
+- Week-by-week ranking progression
+- Team detail pages with game contribution breakdown
+- AP/CFP poll comparison with correlation stats
+- Profile-based configuration switching
+- HTMX-powered dynamic updates without page reload
 
 ---
 
