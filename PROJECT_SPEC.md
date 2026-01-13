@@ -203,6 +203,19 @@ The core algorithm can be augmented with:
 | Week 0 games | Included in week-based filtering |
 | FCS vs FCS games | Filtered out (only FBS-involved games kept) |
 
+### 2.8 Tiebreaker Logic
+
+When teams have ratings within `tie_threshold` (default 0.001), tiebreakers are applied in order:
+
+| Tiebreaker | Description | Calculation |
+|------------|-------------|-------------|
+| `h2h` | Head-to-head result | Count wins between tied teams; more wins = higher rank |
+| `sov` | Strength of Victory | Average rating of beaten opponents; higher = better |
+| `common` | Common Opponents | Margin differential against shared opponents; higher = better |
+| `away` | Away Win Percentage | Wins on the road / total road games; higher = better |
+
+**Multi-way ties (3+ teams):** Pairwise comparison with point scoring. Each head-to-head win = 1 point, tie = 0.5 points. Sort by total points, then by original rating.
+
 ---
 
 ## 3. Prediction System
@@ -265,6 +278,18 @@ def elo_to_probability(home_elo: float, away_elo: float, home_adv: float = 55.0)
     diff = home_elo + home_adv - away_elo
     return 1.0 / (1.0 + 10 ** (-diff / 400))
 ```
+
+**SP+ to Probability:**
+
+```python
+def sp_to_probability(sp_gap: float, neutral_site: bool = False) -> float:
+    """Convert SP+ rating gap to win probability."""
+    home_adv = 0.0 if neutral_site else 2.5  # SP+ home advantage
+    adjusted_gap = sp_gap + home_adv
+    return 1.0 / (1.0 + math.exp(-0.10 * adjusted_gap))
+```
+
+Note: SP+ uses `k=0.10` (shallower curve than rating gap's `k=10.0`) because SP+ ratings have a wider numerical range.
 
 ### 3.3 Confidence Levels
 
@@ -341,7 +366,9 @@ if weak_sos_count >= len(flagged) * 0.6:
 
 ### 4.5 Vegas Upset Analysis
 
-Analyzes games where Vegas favorites lost outright:
+Analyzes games where Vegas favorites lost outright.
+
+**Default filter:** `min_spread=3.0` excludes toss-up games (spreads < 3 points).
 
 **Anomaly factors detected:**
 - Favorite had weak SOS
@@ -907,6 +934,36 @@ class CFBDataClient:
 
 **Rate limit window:** Sliding 3600-second window from first request, not calendar hours.
 
+### 10.6 Team ID Normalization
+
+Team names from the API are normalized to consistent IDs:
+
+```python
+def normalize_team_id(team_name: str) -> str:
+    return team_name.lower().replace(" ", "-").replace("&", "and")
+```
+
+Examples:
+- "Ohio State" → `ohio-state`
+- "Texas A&M" → `texas-a-and-m`
+- "Miami (FL)" → `miami-(fl)`
+
+All team matching uses normalized IDs. CLI commands accept either format.
+
+### 10.7 Neutral Site Overrides
+
+Some games are mislabeled in the source data. The storage layer supports overrides:
+
+```sql
+CREATE TABLE neutral_site_overrides (
+    game_id INTEGER PRIMARY KEY,
+    correct_neutral_site BOOLEAN NOT NULL,
+    reason TEXT
+);
+```
+
+Overrides are applied when fetching games from cache. Use `storage.apply_neutral_override()` to correct mislabeled games.
+
 ---
 
 ## 11. Performance Metrics
@@ -1198,5 +1255,5 @@ uvicorn src.web.app:app --reload
 
 ---
 
-*Last updated: 2026-01-12*
-*Version: 2.0*
+*Last updated: 2026-01-13*
+*Version: 2.1*
